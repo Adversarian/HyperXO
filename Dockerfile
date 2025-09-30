@@ -1,5 +1,7 @@
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm
 
+ENV UV_LINK_MODE=copy
+
 WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
