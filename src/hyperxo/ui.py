@@ -196,19 +196,21 @@ HTML_PAGE = """<!DOCTYPE html>
         display: flex;
         justify-content: center;
         padding: 2rem 1rem 3rem;
+        color: #1a2740;
       }
       main {
-        background: rgba(255, 255, 255, 0.86);
+        background: rgba(255, 255, 255, 0.9);
         border-radius: 18px;
-        box-shadow: 0 24px 48px rgba(34, 47, 79, 0.18);
+        box-shadow: 0 20px 40px rgba(34, 47, 79, 0.16);
         padding: 2rem;
-        width: min(960px, 100%);
+        width: min(780px, 100%);
       }
       h1 {
         margin-top: 0;
         font-size: clamp(1.8rem, 2.4vw + 1.2rem, 2.6rem);
         text-align: center;
         letter-spacing: 0.06em;
+        color: #0f1c34;
       }
       .controls {
         display: flex;
@@ -256,13 +258,15 @@ HTML_PAGE = """<!DOCTYPE html>
       .board-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.75rem;
+        gap: 0.55rem;
+        max-width: 640px;
+        margin: 0 auto;
       }
       .small-board {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 0.35rem;
-        padding: 0.5rem;
+        gap: 0.3rem;
+        padding: 0.45rem;
         border-radius: 12px;
         background: linear-gradient(160deg, rgba(240, 244, 255, 0.9), rgba(213, 222, 255, 0.9));
         border: 2px solid transparent;
@@ -276,13 +280,9 @@ HTML_PAGE = """<!DOCTYPE html>
       .small-board.inactive {
         opacity: 0.6;
       }
-      .small-board.winner-x {
-        background: linear-gradient(140deg, rgba(216, 244, 219, 0.95), rgba(163, 230, 180, 0.9));
-        border-color: #0f8f3a;
-      }
-      .small-board.winner-o {
-        background: linear-gradient(140deg, rgba(255, 221, 221, 0.95), rgba(252, 181, 181, 0.9));
-        border-color: #d64545;
+      .small-board.winner {
+        background: rgba(236, 240, 252, 0.9);
+        border-color: rgba(18, 42, 90, 0.4);
       }
       .small-board.drawn {
         background: linear-gradient(140deg, rgba(226, 229, 240, 0.9), rgba(210, 214, 226, 0.9));
@@ -290,7 +290,7 @@ HTML_PAGE = """<!DOCTYPE html>
       }
       .cell {
         aspect-ratio: 1 / 1;
-        font-size: clamp(1.2rem, 3vw, 2.2rem);
+        font-size: clamp(1rem, 2.5vw, 1.8rem);
         font-weight: 700;
         color: #203050;
         background: rgba(255, 255, 255, 0.95);
@@ -311,6 +311,21 @@ HTML_PAGE = """<!DOCTYPE html>
       .cell.last-move {
         box-shadow: 0 0 0 3px rgba(58, 102, 255, 0.55);
       }
+      .small-board.winner .cell {
+        opacity: 0.35;
+        pointer-events: none;
+      }
+      .board-winner {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: clamp(2.6rem, 7vw, 4.2rem);
+        font-weight: 700;
+        color: rgba(16, 32, 68, 0.85);
+        pointer-events: none;
+      }
       .legend {
         margin-top: 1.5rem;
         display: flex;
@@ -318,17 +333,18 @@ HTML_PAGE = """<!DOCTYPE html>
         gap: 1rem;
         justify-content: center;
         font-size: 0.95rem;
-        color: rgba(30, 35, 60, 0.8);
+        color: rgba(30, 35, 60, 0.76);
       }
       @media (max-width: 720px) {
         main {
           padding: 1.5rem;
         }
         .board-grid {
-          gap: 0.5rem;
+          gap: 0.45rem;
+          max-width: 100%;
         }
         .small-board {
-          gap: 0.25rem;
+          gap: 0.22rem;
         }
       }
     </style>
@@ -350,7 +366,7 @@ HTML_PAGE = """<!DOCTYPE html>
       <div id=\"board\" class=\"board-grid\"></div>
       <div class=\"legend\">
         <span>Blue border: required board for your next move</span>
-        <span>Green / Red board: won by X or O</span>
+        <span>Large X or O overlay: board captured by that player</span>
         <span>Grey board: drawn and unavailable</span>
       </div>
     </main>
@@ -433,10 +449,8 @@ HTML_PAGE = """<!DOCTYPE html>
           const boardEl = document.createElement('div');
           boardEl.classList.add('small-board');
           boardEl.dataset.board = String(board.index + 1);
-          if (board.winner === 'X') {
-            boardEl.classList.add('winner-x');
-          } else if (board.winner === 'O') {
-            boardEl.classList.add('winner-o');
+          if (board.winner === 'X' || board.winner === 'O') {
+            boardEl.classList.add('winner');
           } else if (board.drawn) {
             boardEl.classList.add('drawn');
           }
@@ -466,6 +480,13 @@ HTML_PAGE = """<!DOCTYPE html>
             }
             boardEl.appendChild(cellButton);
           });
+
+          if (board.winner === 'X' || board.winner === 'O') {
+            const overlay = document.createElement('div');
+            overlay.classList.add('board-winner');
+            overlay.textContent = board.winner;
+            boardEl.appendChild(overlay);
+          }
 
           boardContainer.appendChild(boardEl);
         });
