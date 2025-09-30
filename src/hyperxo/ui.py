@@ -185,7 +185,7 @@ HTML_PAGE = """<!DOCTYPE html>
     />
     <style>
       :root {
-        color-scheme: light dark;
+        color-scheme: light;
         font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;
         font-weight: 400;
       }
@@ -196,7 +196,8 @@ HTML_PAGE = """<!DOCTYPE html>
         display: flex;
         justify-content: center;
         padding: 2rem 1rem 3rem;
-        color: #1a2740;
+        color: #13203a;
+        transition: background 0.4s ease;
       }
       main {
         background: rgba(255, 255, 255, 0.9);
@@ -210,7 +211,8 @@ HTML_PAGE = """<!DOCTYPE html>
         font-size: clamp(1.8rem, 2.4vw + 1.2rem, 2.6rem);
         text-align: center;
         letter-spacing: 0.06em;
-        color: #0f1c34;
+        color: #0c1a33;
+        text-shadow: 0 2px 6px rgba(9, 24, 46, 0.15);
       }
       .controls {
         display: flex;
@@ -247,6 +249,19 @@ HTML_PAGE = """<!DOCTYPE html>
         font-size: 1.1rem;
         font-weight: 600;
         margin-bottom: 1rem;
+        color: #14264a;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      #status.ai-turn::after {
+        content: '';
+        width: 1.1rem;
+        height: 1.1rem;
+        border-radius: 999px;
+        border: 3px solid rgba(20, 38, 74, 0.2);
+        border-top-color: rgba(58, 102, 255, 0.8);
+        animation: spin 0.8s linear infinite;
       }
       #message {
         text-align: center;
@@ -261,6 +276,8 @@ HTML_PAGE = """<!DOCTYPE html>
         gap: 0.55rem;
         max-width: 640px;
         margin: 0 auto;
+        position: relative;
+        min-height: min(520px, 90vw);
       }
       .small-board {
         display: grid;
@@ -335,6 +352,47 @@ HTML_PAGE = """<!DOCTYPE html>
         font-size: 0.95rem;
         color: rgba(30, 35, 60, 0.76);
       }
+      .board-grid.thinking::before {
+        content: 'AI is planning the next move…';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(255, 255, 255, 0.92);
+        color: #0f2042;
+        padding: 0.6rem 1.1rem;
+        border-radius: 999px;
+        box-shadow: 0 18px 36px rgba(34, 47, 79, 0.18);
+        font-weight: 600;
+        animation: float 1.8s ease-in-out infinite;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+      .board-grid.thinking::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: rgba(255, 255, 255, 0.55);
+        border-radius: 16px;
+        pointer-events: none;
+      }
+      .board-grid.thinking .cell {
+        filter: blur(1px);
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes float {
+        0%,
+        100% {
+          transform: translate(-50%, -52%);
+        }
+        50% {
+          transform: translate(-50%, -48%);
+        }
+      }
       @media (max-width: 720px) {
         main {
           padding: 1.5rem;
@@ -345,6 +403,10 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         .small-board {
           gap: 0.22rem;
+        }
+        .board-grid.thinking::before {
+          font-size: 0.85rem;
+          padding: 0.5rem 0.9rem;
         }
       }
     </style>
@@ -410,6 +472,9 @@ HTML_PAGE = """<!DOCTYPE html>
         if (gameState?.winner || gameState?.drawn) return;
         isRequestPending = true;
         messageEl.textContent = '';
+        statusEl.textContent = 'AI is thinking…';
+        statusEl.classList.add('ai-turn');
+        boardContainer.classList.add('thinking');
         try {
           const response = await fetch(`/api/game/${gameId}/move`, {
             method: 'POST',
@@ -420,12 +485,16 @@ HTML_PAGE = """<!DOCTYPE html>
             const payload = await response.json().catch(() => ({}));
             const detail = payload?.detail || 'Invalid move';
             messageEl.textContent = detail;
+            statusEl.classList.remove('ai-turn');
+            boardContainer.classList.remove('thinking');
             return;
           }
           const data = await response.json();
           setState(data);
         } catch (error) {
           messageEl.textContent = 'Network error. Please try again.';
+          statusEl.classList.remove('ai-turn');
+          boardContainer.classList.remove('thinking');
         } finally {
           isRequestPending = false;
         }
@@ -440,6 +509,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
       function renderBoard() {
         boardContainer.innerHTML = '';
+        boardContainer.classList.remove('thinking');
         if (!gameState) return;
         const availableMoves = new Set((gameState.availableMoves || []).map((m) => `${m.board}-${m.cell}`));
         const availableBoards = new Set(gameState.availableBoards || []);
@@ -499,13 +569,16 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         if (gameState.winner) {
           statusEl.textContent = gameState.winner === 'X' ? 'You win! 🎉' : 'AI wins! 🤖';
+          statusEl.classList.remove('ai-turn');
           return;
         }
         if (gameState.drawn) {
           statusEl.textContent = 'Draw game. 🤝';
+          statusEl.classList.remove('ai-turn');
           return;
         }
         if (gameState.currentPlayer === 'X') {
+          statusEl.classList.remove('ai-turn');
           if (gameState.nextBoardIndex !== null) {
             statusEl.textContent = `Your move — play in board ${gameState.nextBoardIndex + 1}`;
           } else {
@@ -513,6 +586,10 @@ HTML_PAGE = """<!DOCTYPE html>
           }
         } else {
           statusEl.textContent = 'AI is thinking…';
+          statusEl.classList.add('ai-turn');
+          if (!gameState.winner && !gameState.drawn) {
+            boardContainer.classList.add('thinking');
+          }
         }
       }
 
