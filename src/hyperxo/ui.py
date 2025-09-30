@@ -368,13 +368,17 @@ HTML_PAGE = """<!DOCTYPE html>
       .mark-o::before {
         inset: 0;
         border-radius: 50%;
-        background: linear-gradient(135deg, rgba(158, 198, 255, 0.95), rgba(88, 150, 255, 0.7));
+        background: radial-gradient(circle at 35% 35%, rgba(182, 214, 255, 0.95), rgba(104, 156, 255, 0.82) 62%, rgba(68, 124, 240, 0.7));
         box-shadow: 0 10px 18px rgba(40, 90, 200, 0.18);
+        mask: radial-gradient(circle, transparent 56%, rgba(0, 0, 0, 0.9) 64%);
+        -webkit-mask: radial-gradient(circle, transparent 56%, rgba(0, 0, 0, 0.9) 64%);
       }
       .mark-o::after {
-        inset: 22%;
+        inset: 16%;
         border-radius: 50%;
-        background: rgba(255, 255, 255, 0.95);
+        border: 2px solid rgba(255, 255, 255, 0.75);
+        box-shadow: inset 0 0 4px rgba(204, 228, 255, 0.35);
+        background: transparent;
       }
       .board-winner {
         position: absolute;
