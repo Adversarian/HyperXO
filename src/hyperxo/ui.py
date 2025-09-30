@@ -248,9 +248,10 @@ HTML_PAGE = """<!DOCTYPE html>
         text-align: center;
         font-size: 1.1rem;
         font-weight: 600;
-        margin-bottom: 1rem;
+        margin: 0 auto 1rem;
         color: #14264a;
-        display: inline-flex;
+        display: flex;
+        justify-content: center;
         align-items: center;
         gap: 0.75rem;
       }
