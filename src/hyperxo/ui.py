@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -139,6 +141,7 @@ def _apply_player_move(session: GameSession, board_index: int, cell_index: int) 
         and game.current_player == session.ai.player
     ):
         ai_player = game.current_player
+        time.sleep(random.uniform(1.0, 2.0))
         ai_board, ai_cell = session.ai.choose(game)
         game.play_move(ai_board, ai_cell)
         session.move_log.append(
