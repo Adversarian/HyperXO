@@ -319,6 +319,7 @@ HTML_PAGE = """<!DOCTYPE html>
         border-radius: 10px;
         display: grid;
         place-items: center;
+        position: relative;
         transition: transform 0.1s ease, box-shadow 0.1s ease;
       }
       .cell:hover:not(:disabled) {
@@ -336,16 +337,57 @@ HTML_PAGE = """<!DOCTYPE html>
         opacity: 0.35;
         pointer-events: none;
       }
+      .mark {
+        width: 72%;
+        height: 72%;
+        display: block;
+        position: relative;
+      }
+      .mark::before,
+      .mark::after {
+        content: '';
+        position: absolute;
+      }
+      .mark-x::before,
+      .mark-x::after {
+        top: 0;
+        left: 50%;
+        width: 20%;
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(135deg, rgba(255, 180, 180, 0.95), rgba(244, 104, 104, 0.7));
+        box-shadow: 0 10px 18px rgba(200, 40, 60, 0.18);
+        transform-origin: center;
+      }
+      .mark-x::before {
+        transform: translateX(-50%) rotate(45deg);
+      }
+      .mark-x::after {
+        transform: translateX(-50%) rotate(-45deg);
+      }
+      .mark-o::before {
+        inset: 0;
+        border-radius: 50%;
+        background: linear-gradient(135deg, rgba(158, 198, 255, 0.95), rgba(88, 150, 255, 0.7));
+        box-shadow: 0 10px 18px rgba(40, 90, 200, 0.18);
+      }
+      .mark-o::after {
+        inset: 22%;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.95);
+      }
       .board-winner {
         position: absolute;
         inset: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: clamp(2.6rem, 7vw, 4.2rem);
-        font-weight: 700;
-        color: rgba(16, 32, 68, 0.85);
         pointer-events: none;
+      }
+      .board-winner .mark {
+        width: clamp(55%, 9vw, 72%);
+        height: clamp(55%, 9vw, 72%);
+        filter: drop-shadow(0 18px 28px rgba(18, 36, 72, 0.28));
       }
       .legend {
         margin-top: 1.5rem;
@@ -355,6 +397,17 @@ HTML_PAGE = """<!DOCTYPE html>
         justify-content: center;
         font-size: 0.95rem;
         color: rgba(30, 35, 60, 0.76);
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
       }
       .board-grid.thinking::before {
         content: 'AI is planning the next move…';
@@ -432,7 +485,7 @@ HTML_PAGE = """<!DOCTYPE html>
       <div id=\"board\" class=\"board-grid\"></div>
       <div class=\"legend\">
         <span>Blue border: required board for your next move</span>
-        <span>Large X or O overlay: board captured by that player</span>
+        <span>Large cross or circle overlay: board captured by that player</span>
         <span>Grey board: drawn and unavailable</span>
       </div>
     </main>
@@ -511,6 +564,20 @@ HTML_PAGE = """<!DOCTYPE html>
         updateStatus();
       }
 
+      function insertMark(container, player, options = {}) {
+        const mark = document.createElement('span');
+        mark.classList.add('mark', player === 'X' ? 'mark-x' : 'mark-o');
+        mark.setAttribute('aria-hidden', 'true');
+        container.appendChild(mark);
+        const { includeSrText = true } = options;
+        if (includeSrText) {
+          const srOnly = document.createElement('span');
+          srOnly.classList.add('sr-only');
+          srOnly.textContent = player === 'X' ? 'Player X' : 'Player O';
+          container.appendChild(srOnly);
+        }
+      }
+
       function renderBoard() {
         boardContainer.innerHTML = '';
         boardContainer.classList.remove('thinking');
@@ -540,7 +607,13 @@ HTML_PAGE = """<!DOCTYPE html>
             const cellButton = document.createElement('button');
             cellButton.classList.add('cell');
             cellButton.type = 'button';
-            cellButton.textContent = value ?? '';
+            cellButton.innerHTML = '';
+            if (value === 'X' || value === 'O') {
+              insertMark(cellButton, value);
+              cellButton.setAttribute('aria-label', value === 'X' ? 'Cross placed' : 'Circle placed');
+            } else {
+              cellButton.setAttribute('aria-label', 'Empty cell');
+            }
             const moveKey = `${board.index}-${cellIndex}`;
             const isAllowed = availableMoves.has(moveKey) && !value && !board.winner && !board.drawn;
             if (lastMove && lastMove.boardIndex === board.index && lastMove.cellIndex === cellIndex) {
@@ -558,7 +631,12 @@ HTML_PAGE = """<!DOCTYPE html>
           if (board.winner === 'X' || board.winner === 'O') {
             const overlay = document.createElement('div');
             overlay.classList.add('board-winner');
-            overlay.textContent = board.winner;
+            overlay.setAttribute('role', 'img');
+            overlay.setAttribute(
+              'aria-label',
+              board.winner === 'X' ? 'Board won by Player X' : 'Board won by Player O'
+            );
+            insertMark(overlay, board.winner, { includeSrText: false });
             boardEl.appendChild(overlay);
           }
 
