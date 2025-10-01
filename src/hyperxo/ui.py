@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import random
 import time
 import uuid
@@ -10,7 +11,14 @@ from typing import Dict, List, Optional, Tuple
 
 import threading
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -35,6 +43,62 @@ app = FastAPI(title="HyperXO", description="Hyper tic-tac-toe played in the brow
 
 ALLOWED_DEPTHS: Tuple[int, ...] = (1, 3, 6)
 AI_THINK_DELAY: Tuple[float, float] = (1.0, 2.0)
+ROOM_CODE_LENGTH = 6
+ROOM_TTL_SECONDS = 60 * 30  # 30 minutes
+
+
+@dataclass
+class Room:
+    """In-memory signaling room used for WebRTC peer discovery."""
+
+    room_id: str
+    created_at: float = field(default_factory=lambda: time.time())
+    host: Optional[WebSocket] = field(default=None, repr=False)
+    guest: Optional[WebSocket] = field(default=None, repr=False)
+
+    def other(self, websocket: Optional[WebSocket]) -> Optional[WebSocket]:
+        if websocket is self.host:
+            return self.guest
+        if websocket is self.guest:
+            return self.host
+        return self.host or self.guest
+
+
+ROOMS: Dict[str, Room] = {}
+ROOM_LOCK = asyncio.Lock()
+
+
+def _cleanup_rooms() -> None:
+    """Remove expired rooms that no longer have connected peers."""
+
+    now = time.time()
+    expired = [
+        room_id
+        for room_id, room in list(ROOMS.items())
+        if room.host is None
+        and room.guest is None
+        and now - room.created_at >= ROOM_TTL_SECONDS
+    ]
+    for room_id in expired:
+        ROOMS.pop(room_id, None)
+
+
+def _generate_room_code() -> str:
+    return uuid.uuid4().hex[:ROOM_CODE_LENGTH].upper()
+
+
+async def _get_room(room_id: str, create: bool = False) -> Room:
+    normalized = room_id.strip().upper()
+    async with ROOM_LOCK:
+        _cleanup_rooms()
+        room = ROOMS.get(normalized)
+        if room:
+            return room
+        if not create:
+            raise HTTPException(status_code=404, detail="Room not found")
+        room = Room(room_id=normalized)
+        ROOMS[normalized] = room
+        return room
 
 
 class NewGameRequest(BaseModel):
@@ -218,6 +282,103 @@ def make_move(
     return _serialize_session(game_id, session)
 
 
+@app.post("/api/room")
+async def create_room(request: Request) -> Dict[str, str]:
+    for _ in range(10):
+        room_id = _generate_room_code()
+        async with ROOM_LOCK:
+            _cleanup_rooms()
+            if room_id not in ROOMS:
+                ROOMS[room_id] = Room(room_id=room_id)
+                break
+    else:
+        raise HTTPException(status_code=500, detail="Unable to allocate room")
+
+    base_url = str(request.base_url).rstrip("/")
+    join_url = f"{base_url}/?room={room_id}"
+    return {"roomId": room_id, "joinUrl": join_url}
+
+
+@app.get("/api/room/{room_id}")
+async def inspect_room(room_id: str) -> Dict[str, object]:
+    room = await _get_room(room_id)
+    available_slots = []
+    if room.host is None:
+        available_slots.append("host")
+    if room.guest is None:
+        available_slots.append("guest")
+    return {
+        "roomId": room.room_id,
+        "available": bool(available_slots),
+        "availableSlots": available_slots,
+    }
+
+
+@app.websocket("/ws/room/{room_id}")
+async def room_signaling(websocket: WebSocket, room_id: str) -> None:
+    await websocket.accept()
+    normalized = room_id.strip().upper()
+    room = await _get_room(normalized, create=True)
+
+    async with ROOM_LOCK:
+        role: Optional[str]
+        if room.host is None:
+            room.host = websocket
+            role = "host"
+        elif room.guest is None:
+            room.guest = websocket
+            role = "guest"
+        else:
+            role = None
+
+    if role is None:
+        await websocket.send_json({"type": "error", "message": "Room is full"})
+        await websocket.close()
+        return
+
+    await websocket.send_json({"type": "role", "role": role})
+
+    if role == "guest":
+        other = room.other(websocket)
+        if other is not None:
+            try:
+                await other.send_json({"type": "peer-status", "status": "joined"})
+            except RuntimeError:
+                pass
+
+    try:
+        while True:
+            message = await websocket.receive_json()
+            target: Optional[WebSocket]
+            async with ROOM_LOCK:
+                current_room = ROOMS.get(normalized)
+                target = current_room.other(websocket) if current_room else None
+            if target is not None:
+                try:
+                    await target.send_json(message)
+                except RuntimeError:
+                    pass
+    except WebSocketDisconnect:
+        pass
+    finally:
+        other: Optional[WebSocket] = None
+        async with ROOM_LOCK:
+            current_room = ROOMS.get(normalized)
+            if current_room:
+                other = current_room.other(websocket)
+                if current_room.host is websocket:
+                    current_room.host = None
+                if current_room.guest is websocket:
+                    current_room.guest = None
+                if current_room.host is None and current_room.guest is None:
+                    ROOMS.pop(normalized, None)
+        if other is not None:
+            try:
+                await other.send_json({"type": "peer-status", "status": "left"})
+            except RuntimeError:
+                pass
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return HTML_PAGE
@@ -241,6 +402,9 @@ HTML_PAGE = """<!DOCTYPE html>
         font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif;
         font-weight: 400;
       }
+      * {
+        box-sizing: border-box;
+      }
       body {
         margin: 0;
         background: radial-gradient(circle at top, #f2f5ff, #dbe0ff 40%, #cfd8ff 70%);
@@ -252,19 +416,67 @@ HTML_PAGE = """<!DOCTYPE html>
         transition: background 0.4s ease;
       }
       main {
-        background: rgba(255, 255, 255, 0.9);
+        background: rgba(255, 255, 255, 0.92);
         border-radius: 18px;
         box-shadow: 0 20px 40px rgba(34, 47, 79, 0.16);
-        padding: 2rem;
-        width: min(780px, 100%);
+        padding: clamp(1.5rem, 4vw, 2.5rem);
+        width: min(820px, 100%);
       }
       h1 {
-        margin-top: 0;
+        margin: 0 0 0.5rem;
         font-size: clamp(1.8rem, 2.4vw + 1.2rem, 2.6rem);
         text-align: center;
         letter-spacing: 0.06em;
         color: #0c1a33;
         text-shadow: 0 2px 6px rgba(9, 24, 46, 0.15);
+      }
+      .tagline {
+        text-align: center;
+        margin: 0 0 1.75rem;
+        color: rgba(19, 32, 58, 0.75);
+        font-weight: 500;
+      }
+      .panel {
+        margin-bottom: 1.75rem;
+      }
+      .mode-picker {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        justify-content: center;
+        margin-bottom: 2rem;
+      }
+      button,
+      select,
+      input[type='text'] {
+        font-size: 1rem;
+        padding: 0.55rem 0.95rem;
+        border-radius: 999px;
+        border: 1px solid rgba(60, 70, 120, 0.25);
+        background: white;
+        cursor: pointer;
+        transition: transform 0.1s ease, box-shadow 0.1s ease;
+        font-family: inherit;
+      }
+      button:hover,
+      select:hover,
+      input[type='text']:focus {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 18px rgba(0, 64, 128, 0.12);
+        outline: none;
+      }
+      button:disabled {
+        cursor: default;
+        opacity: 0.6;
+        transform: none;
+        box-shadow: none;
+      }
+      .secondary {
+        background: rgba(226, 232, 255, 0.9);
+      }
+      label {
+        font-weight: 600;
+        margin-right: 0.5rem;
       }
       .controls {
         display: flex;
@@ -272,29 +484,63 @@ HTML_PAGE = """<!DOCTYPE html>
         gap: 0.75rem;
         justify-content: center;
         align-items: center;
-        margin-bottom: 1.5rem;
       }
-      label {
-        font-weight: 600;
+      .peer-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 1rem;
       }
-      select, button {
-        font-size: 1rem;
-        padding: 0.45rem 0.75rem;
+      .join-group {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 0.5rem;
+        align-items: center;
+      }
+      .join-group input[type='text'] {
+        width: 8.5rem;
+        text-transform: uppercase;
+        text-align: center;
+        letter-spacing: 0.2em;
+      }
+      .invite {
+        display: grid;
+        gap: 0.75rem;
+        justify-items: center;
+        padding: 1rem;
+        border-radius: 16px;
+        background: linear-gradient(150deg, rgba(236, 243, 255, 0.9), rgba(206, 222, 255, 0.85));
+        border: 1px solid rgba(58, 102, 255, 0.25);
+        margin-bottom: 1rem;
+      }
+      .code-badge {
+        font-size: 1.65rem;
+        font-weight: 700;
+        letter-spacing: 0.35em;
+        color: #1a2c5a;
+        background: rgba(255, 255, 255, 0.85);
+        padding: 0.5rem 1rem;
         border-radius: 999px;
-        border: 1px solid rgba(60, 70, 120, 0.25);
-        background: white;
-        cursor: pointer;
-        transition: transform 0.1s ease, box-shadow 0.1s ease;
+        box-shadow: 0 12px 24px rgba(58, 102, 255, 0.25);
       }
-      button:hover, select:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 8px 18px rgba(0, 64, 128, 0.12);
+      .link-box {
+        padding: 0.45rem 0.75rem;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.9);
+        font-size: 0.95rem;
+        word-break: break-all;
+        border: 1px dashed rgba(58, 102, 255, 0.3);
       }
-      button:disabled {
-        cursor: default;
-        opacity: 0.6;
-        transform: none;
-        box-shadow: none;
+      .peer-status {
+        text-align: center;
+        font-weight: 600;
+        color: #1f2b52;
+        min-height: 1.5rem;
+      }
+      .hidden {
+        display: none !important;
       }
       #status {
         text-align: center;
@@ -442,43 +688,27 @@ HTML_PAGE = """<!DOCTYPE html>
         justify-content: center;
         pointer-events: none;
       }
-      .board-winner .mark {
-        width: clamp(55%, 9vw, 72%);
-        height: clamp(55%, 9vw, 72%);
-        filter: drop-shadow(0 18px 28px rgba(18, 36, 72, 0.28));
-      }
       .legend {
-        margin-top: 1.5rem;
         display: flex;
-        flex-wrap: wrap;
-        gap: 1rem;
-        justify-content: center;
+        flex-direction: column;
+        gap: 0.4rem;
+        margin: 1.5rem auto 0;
+        max-width: 28rem;
+        text-align: center;
         font-size: 0.95rem;
-        color: rgba(30, 35, 60, 0.76);
-      }
-      .sr-only {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border: 0;
+        color: rgba(18, 38, 74, 0.8);
       }
       .board-grid.thinking::before {
-        content: 'AI is planning the next move…';
+        content: 'AI is thinking…';
         position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(255, 255, 255, 0.92);
-        color: #0f2042;
-        padding: 0.6rem 1.1rem;
-        border-radius: 999px;
-        box-shadow: 0 18px 36px rgba(34, 47, 79, 0.18);
+        inset: 40% 10%;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.9);
+        color: #16264d;
         font-weight: 600;
+        display: grid;
+        place-items: center;
+        box-shadow: 0 18px 36px rgba(34, 47, 79, 0.18);
         animation: float 1.8s ease-in-out infinite;
         pointer-events: none;
         white-space: nowrap;
@@ -510,7 +740,7 @@ HTML_PAGE = """<!DOCTYPE html>
       }
       @media (max-width: 720px) {
         main {
-          padding: 1.5rem;
+          padding: 1.25rem;
         }
         .board-grid {
           gap: 0.45rem;
@@ -529,59 +759,301 @@ HTML_PAGE = """<!DOCTYPE html>
   <body>
     <main>
       <h1>HyperXO</h1>
-      <div class=\"controls\">
-        <label for=\"difficulty\">AI difficulty</label>
-        <select id=\"difficulty\">
-          <option value=\"1\">Beginner (depth 1)</option>
-          <option value=\"3\" selected>Contender (depth 3)</option>
-          <option value=\"6\">Grandmaster (depth 6)</option>
-        </select>
-        <button id=\"new-game\">Start new game</button>
+      <p class=\"tagline\">Battle the AI or duel a friend in hyper tic-tac-toe.</p>
+      <div id=\"mode-picker\" class=\"panel mode-picker\">
+        <button id=\"choose-ai\">Play vs AI</button>
+        <button id=\"choose-peer\">Play with a friend</button>
       </div>
-      <div id=\"status\">Loading game…</div>
-      <div id=\"message\" role=\"status\"></div>
-      <div id=\"board\" class=\"board-grid\"></div>
-      <div class=\"legend\">
-        <span>Blue border: required board for your next move</span>
-        <span>Large cross or circle overlay: board captured by that player</span>
-        <span>Grey board: drawn and unavailable</span>
-      </div>
+      <section id=\"ai-setup\" class=\"panel hidden\">
+        <div class=\"controls\">
+          <label for=\"difficulty\">AI difficulty</label>
+          <select id=\"difficulty\">
+            <option value=\"1\">Beginner (depth 1)</option>
+            <option value=\"3\" selected>Contender (depth 3)</option>
+            <option value=\"6\">Grandmaster (depth 6)</option>
+          </select>
+          <button id=\"new-game\">Start new game</button>
+        </div>
+      </section>
+      <section id=\"peer-setup\" class=\"panel hidden\">
+        <div class=\"peer-actions\">
+          <button id=\"create-room\">Create room</button>
+          <div class=\"join-group\">
+            <input id=\"join-code\" type=\"text\" inputmode=\"numeric\" autocomplete=\"off\" maxlength=\"6\" placeholder=\"ROOM\" aria-label=\"Room code\" />
+            <button id=\"join-room\">Join</button>
+          </div>
+        </div>
+        <div id=\"invite-details\" class=\"invite hidden\" aria-live=\"polite\">
+          <p>Share this code with your friend:</p>
+          <div id=\"invite-code\" class=\"code-badge\"></div>
+          <p>Or send them this link:</p>
+          <div id=\"invite-link\" class=\"link-box\"></div>
+          <canvas id=\"invite-qr\" width=\"160\" height=\"160\" aria-label=\"Room QR code\"></canvas>
+          <p class=\"hint\">They can scan the QR code to join instantly.</p>
+        </div>
+        <div id=\"peer-status\" class=\"peer-status\"></div>
+      </section>
+      <section id=\"game-area\" class=\"panel hidden\">
+        <div id=\"status\">Choose a mode to start playing.</div>
+        <div id=\"message\" role=\"status\"></div>
+        <div id=\"board\" class=\"board-grid\"></div>
+        <div class=\"legend\">
+          <span>Blue border: required board for your next move</span>
+          <span>Large cross or circle overlay: board captured by that player</span>
+          <span>Grey board: drawn and unavailable</span>
+        </div>
+        <div class=\"controls\">
+          <button id=\"leave-room\" class=\"secondary hidden\">Leave peer match</button>
+        </div>
+      </section>
     </main>
+    <script src=\"https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js\"></script>
     <script>
+      const allowedDepths = [1, 3, 6];
+      const modePicker = document.getElementById('mode-picker');
+      const chooseAiButton = document.getElementById('choose-ai');
+      const choosePeerButton = document.getElementById('choose-peer');
+      const aiSetup = document.getElementById('ai-setup');
+      const peerSetup = document.getElementById('peer-setup');
+      const gameArea = document.getElementById('game-area');
       const boardContainer = document.getElementById('board');
       const statusEl = document.getElementById('status');
       const messageEl = document.getElementById('message');
       const difficultyEl = document.getElementById('difficulty');
       const newGameButton = document.getElementById('new-game');
+      const createRoomButton = document.getElementById('create-room');
+      const joinCodeInput = document.getElementById('join-code');
+      const joinRoomButton = document.getElementById('join-room');
+      const inviteDetails = document.getElementById('invite-details');
+      const inviteCodeEl = document.getElementById('invite-code');
+      const inviteLinkEl = document.getElementById('invite-link');
+      const inviteQrCanvas = document.getElementById('invite-qr');
+      const peerStatusEl = document.getElementById('peer-status');
+      const leaveRoomButton = document.getElementById('leave-room');
+
+      let gameMode = null;
       let gameId = null;
       let gameState = null;
       let isRequestPending = false;
       let aiPollHandle = null;
 
-      async function startGame() {
-        if (isRequestPending) return;
-        isRequestPending = true;
-        messageEl.textContent = '';
-        stopAiPolling();
-        const allowedDepths = [1, 3, 6];
-        const requestedDepth = Number.parseInt(difficultyEl.value, 10);
-        const depth = allowedDepths.includes(requestedDepth) ? requestedDepth : 3;
-        try {
-          const response = await fetch('/api/game', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ depth })
-          });
-          if (!response.ok) {
-            throw new Error('Unable to start game');
+      let roomId = null;
+      let peerConnection = null;
+      let dataChannel = null;
+      let signalingSocket = null;
+      let isHost = false;
+      let myMark = null;
+      let peerReady = false;
+      let localGame = null;
+
+      class HyperXOClientGame {
+        constructor(state) {
+          this.boards = Array.from({ length: 9 }, (_, index) => ({
+            index,
+            cells: Array(9).fill(''),
+            winner: null,
+            drawn: false,
+          }));
+          this.currentPlayer = 'X';
+          this.nextBoardIndex = null;
+          this.winner = null;
+          this.drawn = false;
+          this.moveLog = [];
+          if (state) {
+            this.applyState(state);
           }
-          const data = await response.json();
-          setState(data);
-        } catch (error) {
-          messageEl.textContent = error.message;
-        } finally {
-          isRequestPending = false;
         }
+
+        static winningTriples = [
+          [0, 1, 2],
+          [3, 4, 5],
+          [6, 7, 8],
+          [0, 3, 6],
+          [1, 4, 7],
+          [2, 5, 8],
+          [0, 4, 8],
+          [2, 4, 6],
+        ];
+
+        static hasWin(values, player) {
+          return HyperXOClientGame.winningTriples.some((line) =>
+            line.every((index) => values[index] === player)
+          );
+        }
+
+        boardIsAvailable(index) {
+          const board = this.boards[index];
+          if (!board) return false;
+          if (board.winner || board.drawn) return false;
+          return board.cells.some((cell) => !cell);
+        }
+
+        computeAvailableMoves() {
+          if (this.winner || this.drawn) {
+            return [];
+          }
+          const moves = [];
+          const forced =
+            typeof this.nextBoardIndex === 'number' && this.boardIsAvailable(this.nextBoardIndex)
+              ? [this.nextBoardIndex]
+              : null;
+          const boardIndexes = forced || this.boards.map((_, index) => index);
+          boardIndexes.forEach((boardIndex) => {
+            if (!this.boardIsAvailable(boardIndex)) {
+              return;
+            }
+            const board = this.boards[boardIndex];
+            board.cells.forEach((value, cellIndex) => {
+              if (!value) {
+                moves.push({ board: boardIndex, cell: cellIndex });
+              }
+            });
+          });
+          return moves;
+        }
+
+        isMoveAllowed(boardIndex, cellIndex) {
+          return this.computeAvailableMoves().some(
+            (move) => move.board === boardIndex && move.cell === cellIndex
+          );
+        }
+
+        playMove(player, boardIndex, cellIndex) {
+          if (this.winner || this.drawn) {
+            throw new Error('Game already finished');
+          }
+          if (player !== this.currentPlayer) {
+            throw new Error('Not this player\'s turn');
+          }
+          const board = this.boards[boardIndex];
+          if (!board) {
+            throw new Error('Invalid board');
+          }
+          if (board.winner || board.drawn) {
+            throw new Error('Board already resolved');
+          }
+          if (!this.isMoveAllowed(boardIndex, cellIndex)) {
+            throw new Error('Move is not allowed on this turn');
+          }
+          if (board.cells[cellIndex]) {
+            throw new Error('Cell already occupied');
+          }
+          board.cells[cellIndex] = player;
+          if (HyperXOClientGame.hasWin(board.cells, player)) {
+            board.winner = player;
+            board.drawn = false;
+          } else if (board.cells.every((cell) => cell)) {
+            board.drawn = true;
+          }
+          this.moveLog.push({ player, boardIndex, cellIndex });
+          this.nextBoardIndex = cellIndex;
+          if (!this.boardIsAvailable(this.nextBoardIndex)) {
+            this.nextBoardIndex = null;
+          }
+          this.updateMacroOutcome();
+          this.currentPlayer = player === 'X' ? 'O' : 'X';
+        }
+
+        updateMacroOutcome() {
+          const winners = this.boards.map((board) => board.winner || null);
+          if (HyperXOClientGame.hasWin(winners, 'X')) {
+            this.winner = 'X';
+            this.drawn = false;
+            return;
+          }
+          if (HyperXOClientGame.hasWin(winners, 'O')) {
+            this.winner = 'O';
+            this.drawn = false;
+            return;
+          }
+          this.winner = null;
+          const movesRemaining = this.computeAvailableMoves();
+          const boardsOpen = this.boards.some(
+            (board) => !board.winner && !board.drawn && board.cells.some((cell) => !cell)
+          );
+          this.drawn = !this.winner && movesRemaining.length === 0 && !boardsOpen;
+        }
+
+        serialize() {
+          const boards = this.boards.map((board) => ({
+            index: board.index,
+            cells: [...board.cells],
+            winner: board.winner,
+            drawn: board.drawn,
+          }));
+          const availableMoves = this.computeAvailableMoves();
+          const availableBoards = Array.from(
+            new Set(availableMoves.map((move) => move.board))
+          ).sort((a, b) => a - b);
+          const state = {
+            id: null,
+            currentPlayer: this.currentPlayer,
+            nextBoardIndex: this.nextBoardIndex,
+            winner: this.winner,
+            drawn: this.drawn,
+            boards,
+            availableMoves,
+            availableBoards,
+            moveLog: [...this.moveLog],
+          };
+          if (this.moveLog.length) {
+            state.lastMove = this.moveLog[this.moveLog.length - 1];
+          }
+          return state;
+        }
+
+        applyState(state) {
+          this.currentPlayer = state.currentPlayer || 'X';
+          this.nextBoardIndex =
+            typeof state.nextBoardIndex === 'number' ? state.nextBoardIndex : null;
+          this.winner = state.winner || null;
+          this.drawn = Boolean(state.drawn);
+          this.moveLog = Array.isArray(state.moveLog)
+            ? state.moveLog.map((move) => ({ ...move }))
+            : [];
+          if (Array.isArray(state.boards)) {
+            state.boards.forEach((boardState, index) => {
+              const board = this.boards[index];
+              if (!boardState) return;
+              board.cells = Array.isArray(boardState.cells)
+                ? boardState.cells.map((cell) => (cell === 'X' || cell === 'O' ? cell : ''))
+                : Array(9).fill('');
+              board.winner = boardState.winner === 'X' || boardState.winner === 'O'
+                ? boardState.winner
+                : null;
+              board.drawn = Boolean(boardState.drawn);
+            });
+          }
+        }
+
+        static fromState(state) {
+          const game = new HyperXOClientGame();
+          game.applyState(state || {});
+          return game;
+        }
+      }
+
+      function resetUiState() {
+        messageEl.textContent = '';
+        statusEl.classList.remove('ai-turn');
+        boardContainer.classList.remove('thinking');
+      }
+
+      function showPanel(panel) {
+        [aiSetup, peerSetup].forEach((section) => {
+          section.classList.add('hidden');
+        });
+        if (panel) {
+          panel.classList.remove('hidden');
+        }
+      }
+
+      function showGameArea() {
+        gameArea.classList.remove('hidden');
+      }
+
+      function hideGameArea() {
+        gameArea.classList.add('hidden');
       }
 
       function stopAiPolling() {
@@ -596,9 +1068,37 @@ HTML_PAGE = """<!DOCTYPE html>
         aiPollHandle = window.setTimeout(pollAiState, 450);
       }
 
+      async function startGame() {
+        if (gameMode !== 'ai' || isRequestPending) {
+          return;
+        }
+        isRequestPending = true;
+        resetUiState();
+        messageEl.textContent = '';
+        stopAiPolling();
+        const requestedDepth = Number.parseInt(difficultyEl.value, 10);
+        const depth = allowedDepths.includes(requestedDepth) ? requestedDepth : 3;
+        try {
+          const response = await fetch('/api/game', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ depth }),
+          });
+          if (!response.ok) {
+            throw new Error('Unable to start game');
+          }
+          const data = await response.json();
+          setState(data);
+        } catch (error) {
+          messageEl.textContent = error.message || 'Network error. Please try again.';
+        } finally {
+          isRequestPending = false;
+        }
+      }
+
       async function pollAiState() {
         aiPollHandle = null;
-        if (!gameId) return;
+        if (!gameId || gameMode !== 'ai') return;
         try {
           const response = await fetch(`/api/game/${gameId}`);
           if (!response.ok) {
@@ -616,47 +1116,80 @@ HTML_PAGE = """<!DOCTYPE html>
       }
 
       async function sendMove(boardIndex, cellIndex) {
-        if (isRequestPending || !gameId) return;
-        if (gameState?.winner || gameState?.drawn) return;
-        isRequestPending = true;
-        messageEl.textContent = '';
-        statusEl.textContent = 'AI is thinking…';
-        statusEl.classList.add('ai-turn');
-        boardContainer.classList.add('thinking');
-        try {
-          const response = await fetch(`/api/game/${gameId}/move`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ boardIndex, cellIndex })
-          });
-          if (!response.ok) {
-            const payload = await response.json().catch(() => ({}));
-            const detail = payload?.detail || 'Invalid move';
-            messageEl.textContent = detail;
-            statusEl.classList.remove('ai-turn');
-            boardContainer.classList.remove('thinking');
+        if (!gameState || gameState.winner || gameState.drawn) {
+          return;
+        }
+        if (gameMode === 'ai') {
+          if (isRequestPending || !gameId) return;
+          isRequestPending = true;
+          resetUiState();
+          statusEl.textContent = 'AI is thinking…';
+          statusEl.classList.add('ai-turn');
+          boardContainer.classList.add('thinking');
+          try {
+            const response = await fetch(`/api/game/${gameId}/move`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ boardIndex, cellIndex }),
+            });
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({}));
+              const detail = payload?.detail || 'Invalid move';
+              messageEl.textContent = detail;
+              resetUiState();
+              return;
+            }
+            const data = await response.json();
+            setState(data);
+          } catch (error) {
+            messageEl.textContent = 'Network error. Please try again.';
+            resetUiState();
+          } finally {
+            isRequestPending = false;
+          }
+          return;
+        }
+
+        if (gameMode === 'p2p') {
+          if (!peerReady || !localGame || !dataChannel || dataChannel.readyState !== 'open') {
+            messageEl.textContent = 'Waiting for your opponent to connect…';
             return;
           }
-          const data = await response.json();
-          setState(data);
-        } catch (error) {
-          messageEl.textContent = 'Network error. Please try again.';
-          statusEl.classList.remove('ai-turn');
-          boardContainer.classList.remove('thinking');
-        } finally {
-          isRequestPending = false;
+          if (myMark !== localGame.currentPlayer) {
+            messageEl.textContent = "It's not your turn yet.";
+            return;
+          }
+          try {
+            localGame.playMove(myMark, boardIndex, cellIndex);
+            const state = localGame.serialize();
+            setState(state);
+            dataChannel.send(
+              JSON.stringify({
+                type: 'move',
+                boardIndex,
+                cellIndex,
+                player: myMark,
+              })
+            );
+          } catch (error) {
+            messageEl.textContent = error.message;
+          }
         }
       }
 
       function setState(data) {
-        gameId = data.id;
+        if (gameMode === 'ai' && data.id) {
+          gameId = data.id;
+        }
         gameState = data;
         renderBoard();
         updateStatus();
-        if (gameState?.aiPending && !gameState.winner && !gameState.drawn) {
-          ensureAiPolling();
-        } else {
-          stopAiPolling();
+        if (gameMode === 'ai') {
+          if (gameState?.aiPending && !gameState.winner && !gameState.drawn) {
+            ensureAiPolling();
+          } else {
+            stopAiPolling();
+          }
         }
       }
 
@@ -678,9 +1211,13 @@ HTML_PAGE = """<!DOCTYPE html>
         boardContainer.innerHTML = '';
         boardContainer.classList.remove('thinking');
         if (!gameState) return;
-        const availableMoves = new Set((gameState.availableMoves || []).map((m) => `${m.board}-${m.cell}`));
+        const availableMoves = new Set(
+          (gameState.availableMoves || []).map((move) => `${move.board}-${move.cell}`)
+        );
         const availableBoards = new Set(gameState.availableBoards || []);
-        const lastMove = gameState.lastMove || (gameState.moveLog?.length ? gameState.moveLog[gameState.moveLog.length - 1] : null);
+        const lastMove =
+          gameState.lastMove ||
+          (gameState.moveLog?.length ? gameState.moveLog[gameState.moveLog.length - 1] : null);
 
         gameState.boards.forEach((board) => {
           const boardEl = document.createElement('div');
@@ -691,7 +1228,7 @@ HTML_PAGE = """<!DOCTYPE html>
           } else if (board.drawn) {
             boardEl.classList.add('drawn');
           }
-          if (gameState.nextBoardIndex !== null) {
+          if (gameState.nextBoardIndex !== null && typeof gameState.nextBoardIndex === 'number') {
             if (gameState.nextBoardIndex === board.index) {
               boardEl.classList.add('required');
             } else if (!availableBoards.has(board.index)) {
@@ -706,16 +1243,26 @@ HTML_PAGE = """<!DOCTYPE html>
             cellButton.innerHTML = '';
             if (value === 'X' || value === 'O') {
               insertMark(cellButton, value);
-              cellButton.setAttribute('aria-label', value === 'X' ? 'Cross placed' : 'Circle placed');
+              cellButton.setAttribute(
+                'aria-label',
+                value === 'X' ? 'Cross placed' : 'Circle placed'
+              );
             } else {
               cellButton.setAttribute('aria-label', 'Empty cell');
             }
             const moveKey = `${board.index}-${cellIndex}`;
-            const isAllowed = availableMoves.has(moveKey) && !value && !board.winner && !board.drawn;
+            const isAllowed =
+              availableMoves.has(moveKey) && !value && !board.winner && !board.drawn;
             if (lastMove && lastMove.boardIndex === board.index && lastMove.cellIndex === cellIndex) {
               cellButton.classList.add('last-move');
             }
-            if (isAllowed && !gameState.winner && !gameState.drawn) {
+            const canClick =
+              isAllowed &&
+              !gameState.winner &&
+              !gameState.drawn &&
+              (gameMode === 'ai' ||
+                (gameMode === 'p2p' && peerReady && myMark === gameState.currentPlayer));
+            if (canClick) {
               cellButton.disabled = false;
               cellButton.addEventListener('click', () => sendMove(board.index, cellIndex));
             } else {
@@ -742,38 +1289,367 @@ HTML_PAGE = """<!DOCTYPE html>
 
       function updateStatus() {
         if (!gameState) {
-          statusEl.textContent = 'Loading game…';
+          statusEl.textContent =
+            gameMode === 'p2p' ? 'Waiting for connection…' : 'Loading game…';
+          statusEl.classList.remove('ai-turn');
           return;
         }
         if (gameState.winner) {
-          statusEl.textContent = gameState.winner === 'X' ? 'You win! 🎉' : 'AI wins! 🤖';
           statusEl.classList.remove('ai-turn');
+          if (gameMode === 'p2p') {
+            if (gameState.winner === myMark) {
+              statusEl.textContent = 'You win! 🎉';
+            } else {
+              statusEl.textContent = 'Your friend wins this round! ✨';
+            }
+          } else {
+            statusEl.textContent = gameState.winner === 'X' ? 'You win! 🎉' : 'AI wins! 🤖';
+          }
           return;
         }
         if (gameState.drawn) {
-          statusEl.textContent = 'Draw game. 🤝';
           statusEl.classList.remove('ai-turn');
+          statusEl.textContent = 'Draw game. 🤝';
           return;
         }
-        if (gameState.currentPlayer === 'X') {
-          statusEl.classList.remove('ai-turn');
-          if (gameState.nextBoardIndex !== null) {
-            statusEl.textContent = `Your move — play in board ${gameState.nextBoardIndex + 1}`;
+        if (gameMode === 'ai') {
+          if (gameState.currentPlayer === 'X') {
+            statusEl.classList.remove('ai-turn');
+            if (gameState.nextBoardIndex !== null && typeof gameState.nextBoardIndex === 'number') {
+              statusEl.textContent = `Your move — play in board ${gameState.nextBoardIndex + 1}`;
+            } else {
+              statusEl.textContent = 'Your move — pick any open board';
+            }
+          } else {
+            statusEl.textContent = 'AI is thinking…';
+            statusEl.classList.add('ai-turn');
+            boardContainer.classList.add('thinking');
+          }
+          return;
+        }
+        statusEl.classList.remove('ai-turn');
+        if (!peerReady || !myMark) {
+          statusEl.textContent = 'Waiting for your friend to connect…';
+          return;
+        }
+        if (gameState.currentPlayer === myMark) {
+          if (gameState.nextBoardIndex !== null && typeof gameState.nextBoardIndex === 'number') {
+            statusEl.textContent = `Your move on board ${gameState.nextBoardIndex + 1}`;
           } else {
             statusEl.textContent = 'Your move — pick any open board';
           }
         } else {
-          statusEl.textContent = 'AI is thinking…';
-          statusEl.classList.add('ai-turn');
-          if (!gameState.winner && !gameState.drawn) {
-            boardContainer.classList.add('thinking');
-          }
+          statusEl.textContent = "Friend's turn…";
         }
       }
 
+      function resetPeerUi() {
+        peerStatusEl.textContent = '';
+        inviteDetails.classList.add('hidden');
+        inviteCodeEl.textContent = '';
+        inviteLinkEl.textContent = '';
+        joinCodeInput.value = '';
+        leaveRoomButton.classList.add('hidden');
+        myMark = null;
+        peerReady = false;
+        roomId = null;
+      }
+
+      function closePeerSession({ keepMode = false } = {}) {
+        peerReady = false;
+        if (dataChannel) {
+          try {
+            dataChannel.close();
+          } catch (error) {
+            console.warn('Failed to close data channel', error);
+          }
+        }
+        if (peerConnection) {
+          try {
+            peerConnection.close();
+          } catch (error) {
+            console.warn('Failed to close peer connection', error);
+          }
+        }
+        if (signalingSocket && signalingSocket.readyState === WebSocket.OPEN) {
+          signalingSocket.close();
+        }
+        dataChannel = null;
+        peerConnection = null;
+        signalingSocket = null;
+        localGame = null;
+        if (!keepMode) {
+          resetPeerUi();
+        }
+      }
+
+      function sendSignal(payload) {
+        if (signalingSocket && signalingSocket.readyState === WebSocket.OPEN) {
+          signalingSocket.send(JSON.stringify(payload));
+        }
+      }
+
+      function handlePeerLeft() {
+        peerReady = false;
+        statusEl.textContent = 'Your friend disconnected.';
+        messageEl.textContent = '';
+        leaveRoomButton.classList.remove('hidden');
+        peerStatusEl.textContent = 'Peer disconnected — create a new room or wait for them to rejoin.';
+      }
+
+      function bindDataChannel(channel) {
+        dataChannel = channel;
+        channel.addEventListener('open', () => {
+          peerReady = true;
+          messageEl.textContent = '';
+          peerStatusEl.textContent = 'Connected! Take turns placing marks.';
+          leaveRoomButton.classList.remove('hidden');
+          if (!localGame) {
+            localGame = new HyperXOClientGame();
+          }
+          if (isHost) {
+            const state = localGame.serialize();
+            setState(state);
+            channel.send(JSON.stringify({ type: 'sync', state }));
+          } else {
+            channel.send(JSON.stringify({ type: 'sync-request' }));
+          }
+          updateStatus();
+        });
+        channel.addEventListener('message', (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === 'sync' && payload.state) {
+              localGame = HyperXOClientGame.fromState(payload.state);
+              setState(localGame.serialize());
+            } else if (payload.type === 'move') {
+              if (!localGame) {
+                localGame = new HyperXOClientGame();
+              }
+              localGame.playMove(payload.player, payload.boardIndex, payload.cellIndex);
+              setState(localGame.serialize());
+            } else if (payload.type === 'sync-request' && isHost && localGame) {
+              channel.send(JSON.stringify({ type: 'sync', state: localGame.serialize() }));
+            }
+          } catch (error) {
+            console.error('Failed to handle peer message', error);
+          }
+        });
+        channel.addEventListener('close', () => {
+          peerReady = false;
+          if (gameMode === 'p2p') {
+            handlePeerLeft();
+          }
+        });
+      }
+
+      function setupPeerConnection() {
+        const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+        peerConnection = new RTCPeerConnection({ iceServers });
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            sendSignal({ type: 'candidate', candidate: event.candidate });
+          }
+        };
+        peerConnection.onconnectionstatechange = () => {
+          if (!peerConnection) return;
+          const state = peerConnection.connectionState;
+          if (state === 'failed' || state === 'disconnected') {
+            peerReady = false;
+            statusEl.textContent = 'Connection lost. Trying again or create a new room.';
+          }
+        };
+        peerConnection.ondatachannel = (event) => {
+          bindDataChannel(event.channel);
+        };
+        if (isHost) {
+          const channel = peerConnection.createDataChannel('hyperxo');
+          bindDataChannel(channel);
+        }
+      }
+
+      async function connectToRoom(code) {
+        closePeerSession({ keepMode: true });
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        signalingSocket = new WebSocket(`${protocol}://${window.location.host}/ws/room/${code}`);
+        signalingSocket.addEventListener('open', () => {
+          peerStatusEl.textContent = 'Connecting to your opponent…';
+        });
+        signalingSocket.addEventListener('close', () => {
+          if (gameMode === 'p2p' && !peerReady) {
+            peerStatusEl.textContent = 'Signaling connection closed. Try creating a new room.';
+          }
+        });
+        signalingSocket.addEventListener('message', async (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === 'role') {
+              isHost = payload.role === 'host';
+              myMark = isHost ? 'X' : 'O';
+              peerStatusEl.textContent = isHost
+                ? 'Room ready — waiting for your friend to join.'
+                : 'Joining room — finishing setup…';
+              localGame = isHost ? new HyperXOClientGame() : null;
+              setupPeerConnection();
+              if (isHost && peerConnection) {
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                sendSignal({ type: 'offer', sdp: offer });
+              }
+              updateStatus();
+              return;
+            }
+            if (payload.type === 'offer' && peerConnection) {
+              await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+              const answer = await peerConnection.createAnswer();
+              await peerConnection.setLocalDescription(answer);
+              sendSignal({ type: 'answer', sdp: answer });
+              return;
+            }
+            if (payload.type === 'answer' && peerConnection) {
+              await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+              return;
+            }
+            if (payload.type === 'candidate' && peerConnection && payload.candidate) {
+              try {
+                await peerConnection.addIceCandidate(payload.candidate);
+              } catch (error) {
+                console.warn('Failed to add ICE candidate', error);
+              }
+              return;
+            }
+            if (payload.type === 'peer-status') {
+              if (payload.status === 'joined') {
+                peerStatusEl.textContent = 'Peer joined — negotiating connection…';
+              } else if (payload.status === 'left') {
+                handlePeerLeft();
+              }
+              return;
+            }
+            if (payload.type === 'error') {
+              messageEl.textContent = payload.message || 'Unable to join room.';
+            }
+          } catch (error) {
+            console.error('Failed to process signaling message', error);
+          }
+        });
+      }
+
+      function applyInviteDetails(code, joinUrl) {
+        inviteCodeEl.textContent = code;
+        inviteLinkEl.textContent = joinUrl;
+        inviteDetails.classList.remove('hidden');
+        if (window.QRCode) {
+          QRCode.toCanvas(
+            inviteQrCanvas,
+            joinUrl,
+            { width: 180, margin: 1, color: { dark: '#13203a', light: '#ffffff' } },
+            (error) => {
+              if (error) {
+                console.error('QR generation failed', error);
+              }
+            }
+          );
+        }
+      }
+
+      async function handleCreateRoom() {
+        resetPeerUi();
+        messageEl.textContent = '';
+        createRoomButton.disabled = true;
+        try {
+          const response = await fetch('/api/room', { method: 'POST' });
+          if (!response.ok) {
+            throw new Error('Unable to create a room.');
+          }
+          const data = await response.json();
+          roomId = data.roomId;
+          applyInviteDetails(roomId, data.joinUrl);
+          connectToRoom(roomId);
+        } catch (error) {
+          messageEl.textContent = error.message || 'Failed to create room.';
+          resetPeerUi();
+        } finally {
+          createRoomButton.disabled = false;
+        }
+      }
+
+      async function handleJoinRoom() {
+        messageEl.textContent = '';
+        const code = joinCodeInput.value.trim().toUpperCase();
+        if (!code) {
+          messageEl.textContent = 'Enter a room code to join.';
+          return;
+        }
+        try {
+          const response = await fetch(`/api/room/${code}`);
+          if (!response.ok) {
+            throw new Error('Room not found or no longer available.');
+          }
+          const data = await response.json();
+          if (!data.available) {
+            throw new Error('That room is already full.');
+          }
+          roomId = data.roomId;
+          connectToRoom(roomId);
+        } catch (error) {
+          messageEl.textContent = error.message || 'Unable to join room.';
+        }
+      }
+
+      function enterAiMode() {
+        gameMode = 'ai';
+        stopAiPolling();
+        closePeerSession();
+        modePicker.classList.add('hidden');
+        showPanel(aiSetup);
+        showGameArea();
+        leaveRoomButton.classList.add('hidden');
+        statusEl.textContent = 'Loading game…';
+        startGame();
+      }
+
+      function enterPeerMode(autoJoinCode = null) {
+        gameMode = 'p2p';
+        stopAiPolling();
+        closePeerSession();
+        gameId = null;
+        gameState = null;
+        renderBoard();
+        statusEl.textContent = 'Create a room or join one with a code.';
+        modePicker.classList.add('hidden');
+        showPanel(peerSetup);
+        showGameArea();
+        leaveRoomButton.classList.add('hidden');
+        if (autoJoinCode) {
+          joinCodeInput.value = autoJoinCode.toUpperCase();
+          handleJoinRoom();
+        }
+      }
+
+      chooseAiButton.addEventListener('click', enterAiMode);
+      choosePeerButton.addEventListener('click', () => enterPeerMode());
       newGameButton.addEventListener('click', startGame);
-      window.addEventListener('load', startGame);
+      createRoomButton.addEventListener('click', handleCreateRoom);
+      joinRoomButton.addEventListener('click', handleJoinRoom);
+      joinCodeInput.addEventListener('input', () => {
+        joinCodeInput.value = joinCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      });
+      leaveRoomButton.addEventListener('click', () => {
+        closePeerSession();
+        peerStatusEl.textContent = 'You left the match. Create a new room or join another.';
+        statusEl.textContent = 'Waiting to start a new peer match.';
+        gameState = null;
+        renderBoard();
+      });
+
+      const params = new URLSearchParams(window.location.search);
+      const roomParam = params.get('room');
+      if (roomParam) {
+        enterPeerMode(roomParam);
+      }
     </script>
   </body>
 </html>
 """
+
