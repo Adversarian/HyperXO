@@ -65,3 +65,25 @@ def test_invalid_move_rejected():
 def test_rejects_unsupported_depth():
     response = client.post("/api/game", json={"depth": 2})
     assert response.status_code == 422
+
+
+def test_create_room_and_inspect():
+    response = client.post("/api/room")
+    assert response.status_code == 200
+    payload = response.json()
+    room_id = payload["roomId"]
+    assert isinstance(room_id, str)
+    assert len(room_id) == 6
+    assert payload["joinUrl"].endswith(f"?room={room_id}")
+
+    inspect = client.get(f"/api/room/{room_id}")
+    assert inspect.status_code == 200
+    details = inspect.json()
+    assert details["roomId"] == room_id
+    assert details["available"] is True
+    assert "host" in details["availableSlots"] or "guest" in details["availableSlots"]
+
+
+def test_inspect_missing_room_returns_404():
+    missing = client.get("/api/room/INVALID")
+    assert missing.status_code == 404

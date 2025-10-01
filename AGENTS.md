@@ -6,6 +6,8 @@ this repo:
 ## Code style
 - Target Python 3.11+ and prefer standard library solutions.
 - Keep the FastAPI application, HTTP routes, and web UI assets inside `src/hyperxo/ui.py`.
+- WebRTC signaling rooms for peer-to-peer play also live in `src/hyperxo/ui.py`; keep the
+  signaling lifecycle (room creation, WebSocket relays, and client HTML/JS) cohesive there.
 - Maintain the turn-based rules inside `src/hyperxo/game.py` and AI logic in `src/hyperxo/ai.py`.
 - Update this guide if you significantly expand the UI architecture (e.g., move templates or static
   assets out of `ui.py`).
