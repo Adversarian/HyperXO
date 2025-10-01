@@ -439,6 +439,30 @@ HTML_PAGE = """<!DOCTYPE html>
       .panel {
         margin-bottom: 1.75rem;
       }
+      .game-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        margin-bottom: 1rem;
+      }
+      .back-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.45rem 0.85rem;
+        border-radius: 12px;
+        background: rgba(226, 232, 255, 0.6);
+        border: 1px solid rgba(58, 102, 255, 0.25);
+        color: #132347;
+        font-weight: 600;
+      }
+      .back-button:hover {
+        background: rgba(206, 220, 255, 0.85);
+      }
+      .back-button .icon {
+        font-size: 1.1rem;
+        line-height: 1;
+      }
       .mode-picker {
         display: flex;
         flex-wrap: wrap;
@@ -677,21 +701,6 @@ HTML_PAGE = """<!DOCTYPE html>
         font-size: 0.95rem;
         color: rgba(18, 38, 74, 0.8);
       }
-      .board-grid.thinking::before {
-        content: 'AI is thinking…';
-        position: absolute;
-        inset: 40% 10%;
-        border-radius: 16px;
-        background: rgba(255, 255, 255, 0.9);
-        color: #16264d;
-        font-weight: 600;
-        display: grid;
-        place-items: center;
-        box-shadow: 0 18px 36px rgba(34, 47, 79, 0.18);
-        animation: float 1.8s ease-in-out infinite;
-        pointer-events: none;
-        white-space: nowrap;
-      }
       .board-grid.thinking::after {
         content: '';
         position: absolute;
@@ -708,15 +717,6 @@ HTML_PAGE = """<!DOCTYPE html>
           transform: rotate(360deg);
         }
       }
-      @keyframes float {
-        0%,
-        100% {
-          transform: translate(-50%, -52%);
-        }
-        50% {
-          transform: translate(-50%, -48%);
-        }
-      }
       @media (max-width: 720px) {
         main {
           padding: 1.25rem;
@@ -727,10 +727,6 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         .small-board {
           gap: 0.22rem;
-        }
-        .board-grid.thinking::before {
-          font-size: 0.85rem;
-          padding: 0.5rem 0.9rem;
         }
       }
     </style>
@@ -772,8 +768,14 @@ HTML_PAGE = """<!DOCTYPE html>
         </div>
         <div id=\"peer-status\" class=\"peer-status\"></div>
       </section>
-      <section id=\"game-area\" class=\"panel hidden\">
-        <div id=\"status\">Choose a mode to start playing.</div>
+        <section id=\"game-area\" class=\"panel hidden\">
+          <div class=\"game-toolbar\">
+            <button id=\"go-back\" class=\"back-button\" type=\"button\">
+              <span class=\"icon\" aria-hidden=\"true\">&#8592;</span>
+              <span class=\"label\">Back</span>
+            </button>
+          </div>
+          <div id=\"status\">Choose a mode to start playing.</div>
         <div id=\"message\" role=\"status\"></div>
         <div id=\"board\" class=\"board-grid\"></div>
         <div class=\"legend\">
@@ -809,6 +811,7 @@ HTML_PAGE = """<!DOCTYPE html>
       const inviteQrCanvas = document.getElementById('invite-qr');
       const peerStatusEl = document.getElementById('peer-status');
       const leaveRoomButton = document.getElementById('leave-room');
+      const goBackButton = document.getElementById('go-back');
 
       let gameMode = null;
       let gameId = null;
@@ -1047,6 +1050,36 @@ HTML_PAGE = """<!DOCTYPE html>
         aiPollHandle = window.setTimeout(pollAiState, 450);
       }
 
+      function updateDifficultyLock() {
+        if (gameMode !== 'ai') {
+          difficultyEl.disabled = false;
+          return;
+        }
+        if (!gameState || gameState.winner || gameState.drawn) {
+          difficultyEl.disabled = false;
+        } else {
+          difficultyEl.disabled = true;
+        }
+      }
+
+      function returnToModePicker() {
+        stopAiPolling();
+        closePeerSession();
+        gameMode = null;
+        gameId = null;
+        gameState = null;
+        renderBoard();
+        resetUiState();
+        difficultyEl.disabled = false;
+        newGameButton.disabled = false;
+        showPanel(null);
+        hideGameArea();
+        modePicker.classList.remove('hidden');
+        statusEl.textContent = 'Choose a mode to start playing.';
+        messageEl.textContent = '';
+        updateDifficultyLock();
+      }
+
       async function startGame() {
         if (gameMode !== 'ai' || isRequestPending) {
           return;
@@ -1055,6 +1088,12 @@ HTML_PAGE = """<!DOCTYPE html>
         resetUiState();
         messageEl.textContent = '';
         stopAiPolling();
+        gameId = null;
+        gameState = null;
+        renderBoard();
+        statusEl.textContent = 'Setting up your game…';
+        difficultyEl.disabled = true;
+        newGameButton.disabled = true;
         const requestedDepth = Number.parseInt(difficultyEl.value, 10);
         const depth = allowedDepths.includes(requestedDepth) ? requestedDepth : 3;
         try {
@@ -1070,7 +1109,9 @@ HTML_PAGE = """<!DOCTYPE html>
           setState(data);
         } catch (error) {
           messageEl.textContent = error.message || 'Network error. Please try again.';
+          difficultyEl.disabled = false;
         } finally {
+          newGameButton.disabled = false;
           isRequestPending = false;
         }
       }
@@ -1163,6 +1204,7 @@ HTML_PAGE = """<!DOCTYPE html>
         gameState = data;
         renderBoard();
         updateStatus();
+        updateDifficultyLock();
         if (gameMode === 'ai') {
           if (gameState?.aiPending && !gameState.winner && !gameState.drawn) {
             ensureAiPolling();
@@ -1268,14 +1310,21 @@ HTML_PAGE = """<!DOCTYPE html>
       }
 
       function updateStatus() {
+        boardContainer.classList.remove('thinking');
         if (!gameState) {
-          statusEl.textContent =
-            gameMode === 'p2p' ? 'Waiting for connection…' : 'Loading game…';
           statusEl.classList.remove('ai-turn');
+          if (gameMode === 'ai') {
+            statusEl.textContent = 'Choose a difficulty and start a new game.';
+          } else if (gameMode === 'p2p') {
+            statusEl.textContent = 'Create a room or join one with a code.';
+          } else {
+            statusEl.textContent = 'Choose a mode to start playing.';
+          }
           return;
         }
         if (gameState.winner) {
           statusEl.classList.remove('ai-turn');
+          boardContainer.classList.remove('thinking');
           if (gameMode === 'p2p') {
             if (gameState.winner === myMark) {
               statusEl.textContent = 'You win! 🎉';
@@ -1289,12 +1338,14 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         if (gameState.drawn) {
           statusEl.classList.remove('ai-turn');
+          boardContainer.classList.remove('thinking');
           statusEl.textContent = 'Draw game. 🤝';
           return;
         }
         if (gameMode === 'ai') {
           if (gameState.currentPlayer === 'X') {
             statusEl.classList.remove('ai-turn');
+            boardContainer.classList.remove('thinking');
             if (gameState.nextBoardIndex !== null && typeof gameState.nextBoardIndex === 'number') {
               statusEl.textContent = `Your move — play in board ${gameState.nextBoardIndex + 1}`;
             } else {
@@ -1581,12 +1632,19 @@ HTML_PAGE = """<!DOCTYPE html>
         gameMode = 'ai';
         stopAiPolling();
         closePeerSession();
+        gameId = null;
+        gameState = null;
+        renderBoard();
+        resetUiState();
         modePicker.classList.add('hidden');
         showPanel(aiSetup);
         showGameArea();
         leaveRoomButton.classList.add('hidden');
-        statusEl.textContent = 'Loading game…';
-        startGame();
+        messageEl.textContent = '';
+        difficultyEl.disabled = false;
+        newGameButton.disabled = false;
+        statusEl.textContent = 'Choose a difficulty and start a new game.';
+        updateDifficultyLock();
       }
 
       function enterPeerMode(autoJoinCode = null) {
@@ -1596,11 +1654,16 @@ HTML_PAGE = """<!DOCTYPE html>
         gameId = null;
         gameState = null;
         renderBoard();
+        resetUiState();
+        messageEl.textContent = '';
         statusEl.textContent = 'Create a room or join one with a code.';
         modePicker.classList.add('hidden');
         showPanel(peerSetup);
         showGameArea();
         leaveRoomButton.classList.add('hidden');
+        difficultyEl.disabled = false;
+        newGameButton.disabled = false;
+        updateDifficultyLock();
         if (autoJoinCode) {
           joinCodeInput.value = autoJoinCode.toUpperCase();
           handleJoinRoom();
@@ -1612,6 +1675,7 @@ HTML_PAGE = """<!DOCTYPE html>
       newGameButton.addEventListener('click', startGame);
       createRoomButton.addEventListener('click', handleCreateRoom);
       joinRoomButton.addEventListener('click', handleJoinRoom);
+      goBackButton.addEventListener('click', returnToModePicker);
       joinCodeInput.addEventListener('input', () => {
         joinCodeInput.value = joinCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
       });
