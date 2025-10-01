@@ -281,7 +281,6 @@ def make_move(
     )
     return _serialize_session(game_id, session)
 
-
 def _resolve_join_base_url(request: Request) -> str:
     """Determine the best base URL for shareable room links."""
 
@@ -299,7 +298,6 @@ def _resolve_join_base_url(request: Request) -> str:
         return f"{request.url.scheme}://{host}".rstrip("/")
 
     return str(request.base_url).rstrip("/")
-
 
 @app.post("/api/room")
 async def create_room(request: Request) -> Dict[str, str]:
@@ -1453,7 +1451,6 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         return `${window.location.origin}/?room=${code}`;
       }
-
       function handlePeerLeft() {
         peerReady = false;
         statusEl.textContent = 'Your friend disconnected.';
@@ -1565,7 +1562,6 @@ HTML_PAGE = """<!DOCTYPE html>
           peerStatusEl.textContent = 'Unable to negotiate a connection. Please try again.';
         }
       }
-
       async function connectToRoom(code) {
         closePeerSession({ keepMode: true });
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';

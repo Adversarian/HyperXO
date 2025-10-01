@@ -97,7 +97,7 @@ def test_room_join_url_respects_forwarded_headers():
     payload = response.json()
     assert payload["joinUrl"].startswith("https://hyperxo.example:8443/?room=")
 
-
+    
 def test_inspect_missing_room_returns_404():
     missing = client.get("/api/room/INVALID")
     assert missing.status_code == 404
