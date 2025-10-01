@@ -8,7 +8,9 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException
+import threading
+
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -23,6 +25,8 @@ class GameSession:
     game: HyperXOGame
     ai: Optional[MinimaxAI]
     move_log: List[Dict[str, int | str]] = field(default_factory=list)
+    ai_pending: bool = False
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
 SESSIONS: Dict[str, GameSession] = {}
@@ -30,6 +34,7 @@ app = FastAPI(title="HyperXO", description="Hyper tic-tac-toe played in the brow
 
 
 ALLOWED_DEPTHS: Tuple[int, ...] = (1, 3, 6)
+AI_THINK_DELAY: Tuple[float, float] = (1.0, 2.0)
 
 
 class NewGameRequest(BaseModel):
@@ -80,73 +85,113 @@ def _get_session(game_id: str) -> GameSession:
         raise HTTPException(status_code=404, detail="Game not found") from exc
 
 
+def _run_ai_turn(game_id: str) -> None:
+    session = SESSIONS.get(game_id)
+    if not session:
+        return
+
+    time.sleep(max(0.0, random.uniform(*AI_THINK_DELAY)))
+
+    with session.lock:
+        try:
+            if not session.ai:
+                return
+            game = session.game
+            if game.winner or game.drawn:
+                return
+            if game.current_player != session.ai.player:
+                return
+            board_index, cell_index = session.ai.choose(game)
+            game.play_move(board_index, cell_index)
+            session.move_log.append(
+                {
+                    "player": session.ai.player,
+                    "boardIndex": board_index,
+                    "cellIndex": cell_index,
+                }
+            )
+        finally:
+            session.ai_pending = False
+
+
 def _serialize_session(game_id: str, session: GameSession) -> Dict[str, object]:
-    game = session.game
-    boards: List[Dict[str, object]] = []
-    for index, board in enumerate(game.boards):
-        boards.append(
-            {
-                "index": index,
-                "cells": board.cells,
-                "winner": board.winner,
-                "drawn": board.drawn,
-            }
-        )
+    with session.lock:
+        game = session.game
+        boards: List[Dict[str, object]] = []
+        for index, board in enumerate(game.boards):
+            boards.append(
+                {
+                    "index": index,
+                    "cells": board.cells,
+                    "winner": board.winner,
+                    "drawn": board.drawn,
+                }
+            )
 
-    available_moves = [
-        {"board": board_index, "cell": cell_index}
-        for board_index, cell_index in game.available_moves()
-    ]
-    available_boards = sorted({move["board"] for move in available_moves})
+        available_moves = [
+            {"board": board_index, "cell": cell_index}
+            for board_index, cell_index in game.available_moves()
+        ]
+        available_boards = sorted({move["board"] for move in available_moves})
 
-    state: Dict[str, object] = {
-        "id": game_id,
-        "currentPlayer": game.current_player,
-        "nextBoardIndex": game.next_board_index,
-        "winner": game.winner,
-        "drawn": game.drawn,
-        "boards": boards,
-        "availableMoves": available_moves,
-        "availableBoards": available_boards,
-        "moveLog": session.move_log,
-    }
-    if session.move_log:
-        state["lastMove"] = session.move_log[-1]
-    return state
+        state: Dict[str, object] = {
+            "id": game_id,
+            "currentPlayer": game.current_player,
+            "nextBoardIndex": game.next_board_index,
+            "winner": game.winner,
+            "drawn": game.drawn,
+            "boards": boards,
+            "availableMoves": available_moves,
+            "availableBoards": available_boards,
+            "moveLog": list(session.move_log),
+            "aiPending": session.ai_pending,
+        }
+        if session.move_log:
+            state["lastMove"] = session.move_log[-1]
+        return state
 
 
-def _apply_player_move(session: GameSession, board_index: int, cell_index: int) -> None:
-    game = session.game
-    if game.winner or game.drawn:
-        raise HTTPException(status_code=400, detail="Game already finished")
+def _apply_player_move(
+    game_id: str,
+    session: GameSession,
+    board_index: int,
+    cell_index: int,
+    background_tasks: Optional[BackgroundTasks] = None,
+) -> None:
+    should_schedule_ai = False
+    with session.lock:
+        game = session.game
+        if game.winner or game.drawn:
+            raise HTTPException(status_code=400, detail="Game already finished")
 
-    allowed_moves = {(b, c) for b, c in game.available_moves()}
-    if (board_index, cell_index) not in allowed_moves:
-        raise HTTPException(status_code=400, detail="Move is not allowed on this turn")
+        if session.ai_pending:
+            raise HTTPException(status_code=400, detail="AI is completing its move")
 
-    player = game.current_player
-    try:
-        game.play_move(board_index, cell_index)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        allowed_moves = {(b, c) for b, c in game.available_moves()}
+        if (board_index, cell_index) not in allowed_moves:
+            raise HTTPException(status_code=400, detail="Move is not allowed on this turn")
 
-    session.move_log.append(
-        {"player": player, "boardIndex": board_index, "cellIndex": cell_index}
-    )
+        player = game.current_player
+        try:
+            game.play_move(board_index, cell_index)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if (
-        session.ai
-        and not game.winner
-        and not game.drawn
-        and game.current_player == session.ai.player
-    ):
-        ai_player = game.current_player
-        time.sleep(random.uniform(1.0, 2.0))
-        ai_board, ai_cell = session.ai.choose(game)
-        game.play_move(ai_board, ai_cell)
         session.move_log.append(
-            {"player": ai_player, "boardIndex": ai_board, "cellIndex": ai_cell}
+            {"player": player, "boardIndex": board_index, "cellIndex": cell_index}
         )
+
+        should_schedule_ai = (
+            session.ai
+            and not game.winner
+            and not game.drawn
+            and game.current_player == session.ai.player
+        )
+        if should_schedule_ai:
+            session.ai_pending = True
+
+    if should_schedule_ai and background_tasks is not None:
+        background_tasks.add_task(_run_ai_turn, game_id)
 
 
 @app.post("/api/game")
@@ -163,9 +208,13 @@ def get_game(game_id: str) -> Dict[str, object]:
 
 
 @app.post("/api/game/{game_id}/move")
-def make_move(game_id: str, request: MoveRequest) -> Dict[str, object]:
+def make_move(
+    game_id: str, request: MoveRequest, background_tasks: BackgroundTasks
+) -> Dict[str, object]:
     session = _get_session(game_id)
-    _apply_player_move(session, request.board_index, request.cell_index)
+    _apply_player_move(
+        game_id, session, request.board_index, request.cell_index, background_tasks
+    )
     return _serialize_session(game_id, session)
 
 
@@ -355,8 +404,8 @@ HTML_PAGE = """<!DOCTYPE html>
         width: 20%;
         height: 100%;
         border-radius: 999px;
-        background: linear-gradient(135deg, rgba(255, 180, 180, 0.95), rgba(244, 104, 104, 0.7));
-        box-shadow: 0 10px 18px rgba(200, 40, 60, 0.18);
+        background: linear-gradient(135deg, rgba(255, 164, 182, 0.98), rgba(240, 58, 103, 0.84));
+        box-shadow: 0 12px 22px rgba(214, 44, 88, 0.26);
         transform-origin: center;
       }
       .mark-x::before {
@@ -368,17 +417,22 @@ HTML_PAGE = """<!DOCTYPE html>
       .mark-o::before {
         inset: 0;
         border-radius: 50%;
-        background: radial-gradient(circle at 35% 35%, rgba(182, 214, 255, 0.95), rgba(104, 156, 255, 0.82) 62%, rgba(68, 124, 240, 0.7));
-        box-shadow: 0 10px 18px rgba(40, 90, 200, 0.18);
-        mask: radial-gradient(circle, transparent 56%, rgba(0, 0, 0, 0.9) 64%);
-        -webkit-mask: radial-gradient(circle, transparent 56%, rgba(0, 0, 0, 0.9) 64%);
+        background: radial-gradient(
+          circle at center,
+          rgba(255, 255, 255, 0) 48%,
+          rgba(212, 231, 255, 0.3) 58%,
+          rgba(150, 194, 255, 0.85) 72%,
+          rgba(94, 150, 255, 0.95) 86%,
+          rgba(66, 124, 255, 0.98) 100%
+        );
+        box-shadow: 0 12px 22px rgba(66, 124, 255, 0.28);
       }
       .mark-o::after {
-        inset: 16%;
+        inset: 18%;
         border-radius: 50%;
-        border: 2px solid rgba(255, 255, 255, 0.75);
-        box-shadow: inset 0 0 4px rgba(204, 228, 255, 0.35);
-        background: transparent;
+        border: 2px solid rgba(255, 255, 255, 0.9);
+        box-shadow: inset 0 0 6px rgba(220, 235, 255, 0.5);
+        background: radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0) 72%);
       }
       .board-winner {
         position: absolute;
@@ -502,11 +556,13 @@ HTML_PAGE = """<!DOCTYPE html>
       let gameId = null;
       let gameState = null;
       let isRequestPending = false;
+      let aiPollHandle = null;
 
       async function startGame() {
         if (isRequestPending) return;
         isRequestPending = true;
         messageEl.textContent = '';
+        stopAiPolling();
         const allowedDepths = [1, 3, 6];
         const requestedDepth = Number.parseInt(difficultyEl.value, 10);
         const depth = allowedDepths.includes(requestedDepth) ? requestedDepth : 3;
@@ -525,6 +581,37 @@ HTML_PAGE = """<!DOCTYPE html>
           messageEl.textContent = error.message;
         } finally {
           isRequestPending = false;
+        }
+      }
+
+      function stopAiPolling() {
+        if (aiPollHandle !== null) {
+          clearTimeout(aiPollHandle);
+          aiPollHandle = null;
+        }
+      }
+
+      function ensureAiPolling() {
+        if (aiPollHandle !== null) return;
+        aiPollHandle = window.setTimeout(pollAiState, 450);
+      }
+
+      async function pollAiState() {
+        aiPollHandle = null;
+        if (!gameId) return;
+        try {
+          const response = await fetch(`/api/game/${gameId}`);
+          if (!response.ok) {
+            return;
+          }
+          const data = await response.json();
+          setState(data);
+        } catch (error) {
+          console.error('Polling failed', error);
+        } finally {
+          if (gameState?.aiPending && !gameState.winner && !gameState.drawn) {
+            ensureAiPolling();
+          }
         }
       }
 
@@ -566,6 +653,11 @@ HTML_PAGE = """<!DOCTYPE html>
         gameState = data;
         renderBoard();
         updateStatus();
+        if (gameState?.aiPending && !gameState.winner && !gameState.drawn) {
+          ensureAiPolling();
+        } else {
+          stopAiPolling();
+        }
       }
 
       function insertMark(container, player, options = {}) {

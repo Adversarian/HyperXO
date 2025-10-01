@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi.testclient import TestClient
 
+from hyperxo import ui
 from hyperxo.ui import app
 
 
 client = TestClient(app)
+ui.AI_THINK_DELAY = (0.0, 0.0)
 
 
 def test_create_game_and_first_move():
@@ -27,7 +31,15 @@ def test_create_game_and_first_move():
     assert state["moveLog"], "Move log should include at least one move"
     assert state["moveLog"][0]["player"] == "X"
     assert state["boards"][0]["cells"][0] == "X"
-    assert state["currentPlayer"] == "X"
+    assert state["currentPlayer"] == "O"
+    assert state["aiPending"] is True
+
+    time.sleep(0.01)
+    follow_up = client.get(f"/api/game/{game_id}")
+    assert follow_up.status_code == 200
+    final_state = follow_up.json()
+    assert final_state["currentPlayer"] == "X"
+    assert final_state["moveLog"][-1]["player"] == "O"
 
 
 def test_invalid_move_rejected():
