@@ -923,7 +923,7 @@ HTML_PAGE = """<!DOCTYPE html>
             throw new Error('Game already finished');
           }
           if (player !== this.currentPlayer) {
-            throw new Error('Not this player\'s turn');
+            throw new Error("Not this player's turn");
           }
           const board = this.boards[boardIndex];
           if (!board) {
