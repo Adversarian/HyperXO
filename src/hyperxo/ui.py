@@ -542,6 +542,17 @@ HTML_PAGE = """<!DOCTYPE html>
       .hidden {
         display: none !important;
       }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
       #status {
         text-align: center;
         font-size: 1.1rem;
@@ -632,53 +643,18 @@ HTML_PAGE = """<!DOCTYPE html>
         opacity: 0.35;
         pointer-events: none;
       }
-      .mark {
-        width: 72%;
-        height: 72%;
-        display: block;
-        position: relative;
+      .cell-mark {
+        font-size: clamp(1.4rem, 3vw, 2.1rem);
+        font-weight: 700;
+        line-height: 1;
+        text-shadow: 0 2px 6px rgba(20, 32, 58, 0.18);
+        display: inline-block;
       }
-      .mark::before,
-      .mark::after {
-        content: '';
-        position: absolute;
+      .cell-mark.x {
+        color: #f04a6a;
       }
-      .mark-x::before,
-      .mark-x::after {
-        top: 0;
-        left: 50%;
-        width: 20%;
-        height: 100%;
-        border-radius: 999px;
-        background: linear-gradient(135deg, rgba(255, 164, 182, 0.98), rgba(240, 58, 103, 0.84));
-        box-shadow: 0 12px 22px rgba(214, 44, 88, 0.26);
-        transform-origin: center;
-      }
-      .mark-x::before {
-        transform: translateX(-50%) rotate(45deg);
-      }
-      .mark-x::after {
-        transform: translateX(-50%) rotate(-45deg);
-      }
-      .mark-o::before {
-        inset: 0;
-        border-radius: 50%;
-        background: radial-gradient(
-          circle at center,
-          rgba(255, 255, 255, 0) 48%,
-          rgba(212, 231, 255, 0.3) 58%,
-          rgba(150, 194, 255, 0.85) 72%,
-          rgba(94, 150, 255, 0.95) 86%,
-          rgba(66, 124, 255, 0.98) 100%
-        );
-        box-shadow: 0 12px 22px rgba(66, 124, 255, 0.28);
-      }
-      .mark-o::after {
-        inset: 18%;
-        border-radius: 50%;
-        border: 2px solid rgba(255, 255, 255, 0.9);
-        box-shadow: inset 0 0 6px rgba(220, 235, 255, 0.5);
-        background: radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0) 72%);
+      .cell-mark.o {
+        color: #3a7bff;
       }
       .board-winner {
         position: absolute;
@@ -687,6 +663,9 @@ HTML_PAGE = """<!DOCTYPE html>
         align-items: center;
         justify-content: center;
         pointer-events: none;
+      }
+      .board-winner .cell-mark {
+        font-size: clamp(2.8rem, 6vw, 4.2rem);
       }
       .legend {
         display: flex;
@@ -799,7 +778,7 @@ HTML_PAGE = """<!DOCTYPE html>
         <div id=\"board\" class=\"board-grid\"></div>
         <div class=\"legend\">
           <span>Blue border: required board for your next move</span>
-          <span>Large cross or circle overlay: board captured by that player</span>
+          <span>Large X or O overlay: board captured by that player</span>
           <span>Grey board: drawn and unavailable</span>
         </div>
         <div class=\"controls\">
@@ -1195,7 +1174,8 @@ HTML_PAGE = """<!DOCTYPE html>
 
       function insertMark(container, player, options = {}) {
         const mark = document.createElement('span');
-        mark.classList.add('mark', player === 'X' ? 'mark-x' : 'mark-o');
+        mark.classList.add('cell-mark', player === 'X' ? 'x' : 'o');
+        mark.textContent = player;
         mark.setAttribute('aria-hidden', 'true');
         container.appendChild(mark);
         const { includeSrText = true } = options;
@@ -1245,7 +1225,7 @@ HTML_PAGE = """<!DOCTYPE html>
               insertMark(cellButton, value);
               cellButton.setAttribute(
                 'aria-label',
-                value === 'X' ? 'Cross placed' : 'Circle placed'
+                value === 'X' ? 'X placed' : 'O placed'
               );
             } else {
               cellButton.setAttribute('aria-label', 'Empty cell');
