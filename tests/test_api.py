@@ -68,13 +68,14 @@ def test_rejects_unsupported_depth():
 
 
 def test_create_room_and_inspect():
-    response = client.post("/api/room")
+    origin = "https://play.hyperxo.test"
+    response = client.post("/api/room", headers={"origin": origin})
     assert response.status_code == 200
     payload = response.json()
     room_id = payload["roomId"]
     assert isinstance(room_id, str)
     assert len(room_id) == 6
-    assert payload["joinUrl"].endswith(f"?room={room_id}")
+    assert payload["joinUrl"] == f"{origin}/?room={room_id}"
 
     inspect = client.get(f"/api/room/{room_id}")
     assert inspect.status_code == 200
@@ -84,6 +85,19 @@ def test_create_room_and_inspect():
     assert "host" in details["availableSlots"] or "guest" in details["availableSlots"]
 
 
+def test_room_join_url_respects_forwarded_headers():
+    response = client.post(
+        "/api/room",
+        headers={
+            "x-forwarded-host": "hyperxo.example:8443",
+            "x-forwarded-proto": "https",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["joinUrl"].startswith("https://hyperxo.example:8443/?room=")
+
+    
 def test_inspect_missing_room_returns_404():
     missing = client.get("/api/room/INVALID")
     assert missing.status_code == 404

@@ -281,6 +281,23 @@ def make_move(
     )
     return _serialize_session(game_id, session)
 
+def _resolve_join_base_url(request: Request) -> str:
+    """Determine the best base URL for shareable room links."""
+
+    origin = request.headers.get("origin")
+    if origin:
+        return origin.rstrip("/")
+
+    forwarded_host = request.headers.get("x-forwarded-host")
+    if forwarded_host:
+        scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
+        return f"{scheme}://{forwarded_host}".rstrip("/")
+
+    host = request.headers.get("host")
+    if host:
+        return f"{request.url.scheme}://{host}".rstrip("/")
+
+    return str(request.base_url).rstrip("/")
 
 @app.post("/api/room")
 async def create_room(request: Request) -> Dict[str, str]:
@@ -294,7 +311,7 @@ async def create_room(request: Request) -> Dict[str, str]:
     else:
         raise HTTPException(status_code=500, detail="Unable to allocate room")
 
-    base_url = str(request.base_url).rstrip("/")
+    base_url = _resolve_join_base_url(request)
     join_url = f"{base_url}/?room={room_id}"
     return {"roomId": room_id, "joinUrl": join_url}
 
@@ -1420,12 +1437,29 @@ HTML_PAGE = """<!DOCTYPE html>
         }
       }
 
+      function buildShareUrl(code, serverUrl) {
+        if (serverUrl) {
+          try {
+            const parsed = new URL(serverUrl, window.location.href);
+            parsed.protocol = window.location.protocol;
+            parsed.host = window.location.host;
+            parsed.search = `?room=${code}`;
+            return parsed.toString();
+          } catch (error) {
+            console.warn('Falling back to local share URL', error);
+          }
+        }
+        return `${window.location.origin}/?room=${code}`;
+      }
       function handlePeerLeft() {
         peerReady = false;
         statusEl.textContent = 'Your friend disconnected.';
         messageEl.textContent = '';
         leaveRoomButton.classList.remove('hidden');
         peerStatusEl.textContent = 'Peer disconnected — create a new room or wait for them to rejoin.';
+        if (isHost) {
+          setupPeerConnection();
+        }
       }
 
       function bindDataChannel(channel) {
@@ -1475,6 +1509,22 @@ HTML_PAGE = """<!DOCTYPE html>
       }
 
       function setupPeerConnection() {
+        if (dataChannel) {
+          try {
+            dataChannel.close();
+          } catch (error) {
+            console.warn('Failed to close existing data channel', error);
+          }
+          dataChannel = null;
+          peerReady = false;
+        }
+        if (peerConnection) {
+          try {
+            peerConnection.close();
+          } catch (error) {
+            console.warn('Failed to close existing peer connection', error);
+          }
+        }
         const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
         peerConnection = new RTCPeerConnection({ iceServers });
         peerConnection.onicecandidate = (event) => {
@@ -1499,6 +1549,19 @@ HTML_PAGE = """<!DOCTYPE html>
         }
       }
 
+      async function createAndSendOffer() {
+        if (!peerConnection || peerConnection.connectionState === 'closed') {
+          return;
+        }
+        try {
+          const offer = await peerConnection.createOffer();
+          await peerConnection.setLocalDescription(offer);
+          sendSignal({ type: 'offer', sdp: offer });
+        } catch (error) {
+          console.error('Failed to create offer', error);
+          peerStatusEl.textContent = 'Unable to negotiate a connection. Please try again.';
+        }
+      }
       async function connectToRoom(code) {
         closePeerSession({ keepMode: true });
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -1522,11 +1585,6 @@ HTML_PAGE = """<!DOCTYPE html>
                 : 'Joining room — finishing setup…';
               localGame = isHost ? new HyperXOClientGame() : null;
               setupPeerConnection();
-              if (isHost && peerConnection) {
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-                sendSignal({ type: 'offer', sdp: offer });
-              }
               updateStatus();
               return;
             }
@@ -1552,6 +1610,12 @@ HTML_PAGE = """<!DOCTYPE html>
             if (payload.type === 'peer-status') {
               if (payload.status === 'joined') {
                 peerStatusEl.textContent = 'Peer joined — negotiating connection…';
+                if (isHost) {
+                  if (!peerConnection || peerConnection.connectionState === 'closed') {
+                    setupPeerConnection();
+                  }
+                  await createAndSendOffer();
+                }
               } else if (payload.status === 'left') {
                 handlePeerLeft();
               }
@@ -1567,13 +1631,14 @@ HTML_PAGE = """<!DOCTYPE html>
       }
 
       function applyInviteDetails(code, joinUrl) {
+        const shareUrl = buildShareUrl(code, joinUrl);
         inviteCodeEl.textContent = code;
-        inviteLinkEl.textContent = joinUrl;
+        inviteLinkEl.textContent = shareUrl;
         inviteDetails.classList.remove('hidden');
         if (window.QRCode) {
           QRCode.toCanvas(
             inviteQrCanvas,
-            joinUrl,
+            shareUrl,
             { width: 180, margin: 1, color: { dark: '#13203a', light: '#ffffff' } },
             (error) => {
               if (error) {
