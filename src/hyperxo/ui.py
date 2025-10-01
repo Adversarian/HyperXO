@@ -41,7 +41,7 @@ SESSIONS: Dict[str, GameSession] = {}
 app = FastAPI(title="HyperXO", description="Hyper tic-tac-toe played in the browser")
 
 
-ALLOWED_DEPTHS: Tuple[int, ...] = (1, 3, 6)
+ALLOWED_DEPTHS: Tuple[int, ...] = (3, 5, 8)
 AI_THINK_DELAY: Tuple[float, float] = (1.0, 2.0)
 ROOM_CODE_LENGTH = 6
 ROOM_TTL_SECONDS = 60 * 30  # 30 minutes
@@ -106,8 +106,8 @@ class NewGameRequest(BaseModel):
 
     depth: int = Field(
         default=3,
-        ge=1,
-        le=6,
+        ge=3,
+        le=8,
         description="Minimax depth controlling AI strength",
     )
 
@@ -186,7 +186,7 @@ def _serialize_session(game_id: str, session: GameSession) -> Dict[str, object]:
             boards.append(
                 {
                     "index": index,
-                    "cells": board.cells,
+                    "cells": [c if c in ("X", "O") else "" for c in board.cells],
                     "winner": board.winner,
                     "drawn": board.drawn,
                 }
@@ -233,7 +233,9 @@ def _apply_player_move(
 
         allowed_moves = {(b, c) for b, c in game.available_moves()}
         if (board_index, cell_index) not in allowed_moves:
-            raise HTTPException(status_code=400, detail="Move is not allowed on this turn")
+            raise HTTPException(
+                status_code=400, detail="Move is not allowed on this turn"
+            )
 
         player = game.current_player
         try:
@@ -281,6 +283,7 @@ def make_move(
     )
     return _serialize_session(game_id, session)
 
+
 def _resolve_join_base_url(request: Request) -> str:
     """Determine the best base URL for shareable room links."""
 
@@ -298,6 +301,7 @@ def _resolve_join_base_url(request: Request) -> str:
         return f"{request.url.scheme}://{host}".rstrip("/")
 
     return str(request.base_url).rstrip("/")
+
 
 @app.post("/api/room")
 async def create_room(request: Request) -> Dict[str, str]:
@@ -760,9 +764,9 @@ HTML_PAGE = """<!DOCTYPE html>
         <div class=\"controls\">
           <label for=\"difficulty\">AI difficulty</label>
           <select id=\"difficulty\">
-            <option value=\"1\">Beginner (depth 1)</option>
-            <option value=\"3\" selected>Contender (depth 3)</option>
-            <option value=\"6\">Grandmaster (depth 6)</option>
+            <option value=\"3\">Beginner (depth 3)</option>
+            <option value=\"5\" selected>Contender (depth 5)</option>
+            <option value=\"8\">Grandmaster (depth 8)</option>
           </select>
           <button id=\"new-game\">Start new game</button>
         </div>
@@ -807,7 +811,7 @@ HTML_PAGE = """<!DOCTYPE html>
     </main>
     <script src=\"https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js\"></script>
     <script>
-      const allowedDepths = [1, 3, 6];
+      const allowedDepths = [3, 5, 8];
       const modePicker = document.getElementById('mode-picker');
       const chooseAiButton = document.getElementById('choose-ai');
       const choosePeerButton = document.getElementById('choose-peer');
@@ -1451,6 +1455,7 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         return `${window.location.origin}/?room=${code}`;
       }
+
       function handlePeerLeft() {
         peerReady = false;
         statusEl.textContent = 'Your friend disconnected.';
@@ -1562,6 +1567,7 @@ HTML_PAGE = """<!DOCTYPE html>
           peerStatusEl.textContent = 'Unable to negotiate a connection. Please try again.';
         }
       }
+
       async function connectToRoom(code) {
         closePeerSession({ keepMode: true });
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';

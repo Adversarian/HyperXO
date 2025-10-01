@@ -1,12 +1,12 @@
-"""Core game logic for the HyperXO variant of tic-tac-toe."""
+"""Core rules and fast hashing for HyperXO (Ultimate Tic-Tac-Toe)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
+import random
 
-Player = str
-
+Player = str  # "X" or "O"
 
 WINNING_LINES: Tuple[Tuple[int, int, int], ...] = (
     (0, 1, 2),
@@ -20,142 +20,206 @@ WINNING_LINES: Tuple[Tuple[int, int, int], ...] = (
 )
 
 
+# ---------- Small board ----------
+
+
 @dataclass
 class SmallBoard:
-    """Represents a single 3x3 tic-tac-toe board."""
-
-    cells: List[Optional[Player]] = field(default_factory=lambda: [None] * 9)
+    # Server-internal: 'X', 'O', or ' ' (space) for empty
+    cells: List[str] = field(default_factory=lambda: [" "] * 9)
     winner: Optional[Player] = None
     drawn: bool = False
 
-    def play(self, index: int, player: Player) -> None:
+    def is_full(self) -> bool:
+        return all(c != " " for c in self.cells)
+
+    def place(self, player: Player, idx: int) -> None:
         if self.winner or self.drawn:
-            raise ValueError("Cannot play on a finished board")
-        if not 0 <= index < 9:
-            raise ValueError("Cell index out of range")
-        if self.cells[index] is not None:
-            raise ValueError("Cell already taken")
-        self.cells[index] = player
+            raise ValueError("Board already resolved")
+        if self.cells[idx] != " ":
+            raise ValueError("Cell already occupied")
+        self.cells[idx] = player
         self._update_state()
 
-    def available_moves(self) -> List[int]:
-        if self.winner or self.drawn:
-            return []
-        return [i for i, cell in enumerate(self.cells) if cell is None]
-
     def _update_state(self) -> None:
+        # Detect local winner
         for a, b, c in WINNING_LINES:
-            if self.cells[a] and self.cells[a] == self.cells[b] == self.cells[c]:
-                self.winner = self.cells[a]
+            v = self.cells[a]
+            if v != " " and v == self.cells[b] == self.cells[c]:
+                self.winner = v
+                self.drawn = False
                 return
-        if all(cell is not None for cell in self.cells):
+        # Detect local draw
+        if self.is_full():
+            self.winner = None
             self.drawn = True
 
-    def clone(self) -> "SmallBoard":
-        clone = SmallBoard()
-        clone.cells = self.cells.copy()
-        clone.winner = self.winner
-        clone.drawn = self.drawn
-        return clone
+
+# ---------- Zobrist hashing ----------
+
+
+class Zobrist:
+    """
+    64-bit Zobrist keys:
+    - piece_table[big][cell][pieceIndex] for pieceIndex: 0->'X', 1->'O'
+    - side_to_move toggler
+    - next_board_index key for 0..8 plus 9 => free (None)
+    """
+
+    def __init__(self, seed: int = 7777):
+        rng = random.Random(seed)
+        self.piece_table = [
+            [[rng.getrandbits(64) for _ in range(2)] for _ in range(9)]
+            for _ in range(9)
+        ]
+        self.side_to_move = rng.getrandbits(64)
+        self.next_board_key = [rng.getrandbits(64) for _ in range(10)]
+
+    def piece_key(self, big: int, cell: int, player: Player) -> int:
+        return self.piece_table[big][cell][0 if player == "X" else 1]
+
+    def stm_key(self) -> int:
+        return self.side_to_move
+
+    def nbi_key(self, nbi: Optional[int]) -> int:
+        return self.next_board_key[nbi if nbi is not None else 9]
+
+
+# ---------- Game ----------
 
 
 @dataclass
 class HyperXOGame:
-    """Game state manager for HyperXO."""
-
-    boards: List[SmallBoard] = field(default_factory=lambda: [SmallBoard() for _ in range(9)])
+    boards: List[SmallBoard] = field(
+        default_factory=lambda: [SmallBoard() for _ in range(9)]
+    )
     current_player: Player = "X"
+    # UI relies on this name; None means "free move" (no forced board)
     next_board_index: Optional[int] = None
     winner: Optional[Player] = None
     drawn: bool = False
 
-    def clone(self) -> "HyperXOGame":
-        return HyperXOGame(
-            boards=[board.clone() for board in self.boards],
-            current_player=self.current_player,
-            next_board_index=self.next_board_index,
-            winner=self.winner,
-            drawn=self.drawn,
-        )
+    # Zobrist internals
+    _zobrist: Zobrist = field(default_factory=Zobrist, init=False, repr=False)
+    _zkey: int = field(default=0, init=False, repr=False)
 
-    def play_move(self, board_index: int, cell_index: int) -> None:
-        if self.winner or self.drawn:
-            raise ValueError("Game already finished")
-        if not 0 <= board_index < 9:
-            raise ValueError("Board index out of range")
-        target_board = self.boards[board_index]
-        if self.next_board_index is not None and board_index != self.next_board_index:
-            if not self.is_board_available(self.next_board_index):
-                self.next_board_index = None
-            elif board_index != self.next_board_index:
-                raise ValueError("Must play on the directed board")
-        if self.next_board_index is None and not self.is_board_available(board_index):
-            raise ValueError("Board not available")
+    def __post_init__(self) -> None:
+        # Build initial hash: empty position, encode side and forced board (None)
+        if self.current_player == "O":
+            self._zkey ^= self._zobrist.stm_key()
+        self._zkey ^= self._zobrist.nbi_key(self.next_board_index)
 
-        target_board.play(cell_index, self.current_player)
-        self._update_overall_state()
-        self.next_board_index = cell_index
-        if self.next_board_index is not None and not self.is_board_available(self.next_board_index):
-            self.next_board_index = None
-        self._swap_player()
+    # ---- API used by UI & AI ----
 
-    def _swap_player(self) -> None:
-        self.current_player = "O" if self.current_player == "X" else "X"
-
-    def is_board_available(self, board_index: int) -> bool:
-        board = self.boards[board_index]
-        return not (board.winner or board.drawn)
+    def big_board_state(self) -> List[str]:
+        """
+        Returns 9 chars summarizing each small board:
+        'X' or 'O' if captured, 'G' if drawn (grey), '.' if ongoing.
+        """
+        out: List[str] = []
+        for b in self.boards:
+            if b.winner == "X":
+                out.append("X")
+            elif b.winner == "O":
+                out.append("O")
+            elif b.drawn:
+                out.append("G")
+            else:
+                out.append(".")
+        return out
 
     def available_moves(self) -> List[Tuple[int, int]]:
-        if self.winner or self.drawn:
-            return []
-        if self.next_board_index is not None and self.is_board_available(self.next_board_index):
-            boards = [self.next_board_index]
-        else:
-            boards = [i for i in range(9) if self.is_board_available(i)]
+        """All legal (bigIndex, cellIndex) moves given the 'send' rule."""
+
+        def live(i: int) -> bool:
+            b = self.boards[i]
+            return not b.winner and not b.drawn and not b.is_full()
+
         moves: List[Tuple[int, int]] = []
-        for board_index in boards:
-            board = self.boards[board_index]
-            for cell in board.available_moves():
-                moves.append((board_index, cell))
+        # If forced board is live, must play there; otherwise free anywhere live
+        if self.next_board_index is not None and live(self.next_board_index):
+            i = self.next_board_index
+            b = self.boards[i]
+            for j, c in enumerate(b.cells):
+                if c == " ":
+                    moves.append((i, j))
+            return moves
+
+        for i, b in enumerate(self.boards):
+            if live(i):
+                for j, c in enumerate(b.cells):
+                    if c == " ":
+                        moves.append((i, j))
         return moves
 
-    def _update_overall_state(self) -> None:
-        board_winners = [board.winner for board in self.boards]
+    def play_move(self, big: int, cell: int) -> None:
+        """Apply a legal move, update local/macro state, forced board, and hash."""
+        if self.winner or self.drawn:
+            raise ValueError("Game already finished")
+
+        # Quick legality gate (server already checks, but keep robust)
+        legal = {(i, j) for (i, j) in self.available_moves()}
+        if (big, cell) not in legal:
+            raise ValueError("Illegal move for the current position")
+
+        # Remove old forced-board component
+        self._zkey ^= self._zobrist.nbi_key(self.next_board_index)
+
+        # Place on small board
+        self.boards[big].place(self.current_player, cell)
+        # Hash in the placed piece
+        self._zkey ^= self._zobrist.piece_key(big, cell, self.current_player)
+
+        # Update macro result
+        self._update_global_state()
+
+        # Compute next forced board from the cell just played
+        target = cell
+        # If target board is resolved/full, free move (None); else force there
+        if target is not None:
+            tb = self.boards[target]
+            self.next_board_index = (
+                None if (tb.winner or tb.drawn or tb.is_full()) else target
+            )
+
+        # Add new forced-board component
+        self._zkey ^= self._zobrist.nbi_key(self.next_board_index)
+
+        # Switch player and toggle side-to-move
+        self.current_player = "O" if self.current_player == "X" else "X"
+        self._zkey ^= self._zobrist.stm_key()
+
+    def clone(self) -> "HyperXOGame":
+        g = HyperXOGame(
+            boards=[
+                SmallBoard(cells=b.cells.copy(), winner=b.winner, drawn=b.drawn)
+                for b in self.boards
+            ],
+            current_player=self.current_player,
+            next_board_index=self.next_board_index,
+        )
+        g.winner = self.winner
+        g.drawn = self.drawn
+        # carry over hash state and table to make clones cheap
+        g._zobrist = self._zobrist
+        g._zkey = self._zkey
+        return g
+
+    def zobrist_hash(self) -> int:
+        return self._zkey
+
+    # ---- helpers ----
+
+    def _update_global_state(self) -> None:
+        bb = self.big_board_state()  # 'X','O','G','.'
+        # Macro winner?
         for a, b, c in WINNING_LINES:
-            if board_winners[a] and board_winners[a] == board_winners[b] == board_winners[c]:
-                self.winner = board_winners[a]
+            if bb[a] in ("X", "O") and bb[a] == bb[b] == bb[c]:
+                self.winner = bb[a]
+                self.drawn = False
                 return
-        if all(board.winner or board.drawn for board in self.boards):
+        # Macro draw? If no legal moves and no winner
+        if not self.available_moves():
+            self.winner = None
             self.drawn = True
 
-    def big_board_state(self) -> List[Optional[Player]]:
-        return [board.winner for board in self.boards]
-
-    def reset(self) -> None:
-        self.boards = [SmallBoard() for _ in range(9)]
-        self.current_player = "X"
-        self.next_board_index = None
-        self.winner = None
-        self.drawn = False
-
-
-def format_board(game: HyperXOGame) -> str:
-    """Return a human-readable string of the current state."""
-
-    def cell_repr(board: SmallBoard, idx: int) -> str:
-        val = board.cells[idx]
-        return val if val else " "
-
-    rows = []
-    for big_row in range(3):
-        for small_row in range(3):
-            row_cells = []
-            for big_col in range(3):
-                board_index = big_row * 3 + big_col
-                board = game.boards[board_index]
-                start = small_row * 3
-                row_cells.append("|".join(cell_repr(board, start + i) for i in range(3)))
-            rows.append(" || ".join(row_cells))
-        rows.append("====+=====+====")
-    return "\n".join(rows[:-1])
