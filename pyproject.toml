@@ -1,0 +1,22 @@
+[project]
+name = "hyperxo"
+version = "0.1.0"
+description = "Hyper tic-tac-toe game with minimax AI"
+authors = [
+    { name = "HyperXO Contributors", email = "dev@example.com" }
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "httpx>=0.27",
+]
+
+[tool.uv]
+package = true
