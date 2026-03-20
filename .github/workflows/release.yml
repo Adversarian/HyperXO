@@ -1,8 +1,9 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -59,8 +60,8 @@ jobs:
           projectPath: frontend
           tauriScript: npx tauri
           args: --target ${{ matrix.target }}
-          tagName: ${{ github.event.release.tag_name }}
-          releaseName: "HyperXO ${{ github.event.release.tag_name }}"
+          tagName: ${{ github.ref_name }}
+          releaseName: "HyperXO ${{ github.ref_name }}"
           releaseBody: "See the release notes for details."
           releaseDraft: false
           prerelease: false

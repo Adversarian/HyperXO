@@ -62,6 +62,18 @@ cd frontend
 npx vitest run
 ```
 
+## Releasing
+
+To create a new release with cross-platform desktop builds:
+
+```bash
+git tag v0.2.0
+git push --tags
+```
+
+This triggers the CI workflow which builds for Linux, macOS (ARM + Intel), and Windows,
+then creates a GitHub release with the executables attached.
+
 ## Architecture
 
 ```
