@@ -45,7 +45,7 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
       </div>
 
       {/* AI Game */}
-      <div className="w-full max-w-lg flex flex-col gap-4">
+      <div className="w-full max-w-lg flex flex-col gap-5">
         <h2 className="text-zinc-300 text-lg font-medium text-center">Play vs. AI</h2>
 
         <div className="grid grid-cols-3 gap-2">
