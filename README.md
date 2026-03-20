@@ -1,77 +1,89 @@
 # HyperXO
 
-HyperXO is a Python implementation of hyper tic-tac-toe (also known as Ultimate Tic-Tac-Toe).
-It provides a FastAPI-powered backend with a browser-based UI and a minimax AI with adjustable
-search depth.
+HyperXO is an implementation of Ultimate Tic-Tac-Toe with a minimax AI,
+peer-to-peer multiplayer, and a native desktop app.
 
 ## Features
 
-- Full HyperXO rules, including directed moves and board resolution
-- FastAPI backend with JSON endpoints for game orchestration
-- Responsive web UI rendered from a single-page experience
-- Peer-to-peer friend matches with WebRTC signaling and QR-code invites
-- Minimax AI with three difficulty levels (depths 1, 3, and 6)
-- Unit tests covering the core game logic and API surface
-- `uv`-managed project metadata with Docker support for local development
+- Full Ultimate Tic-Tac-Toe rules, including directed moves and board resolution
+- React + TypeScript frontend with Tailwind CSS
+- Minimax AI with alpha-beta pruning, iterative deepening, and transposition tables
+- Three difficulty levels: Novax (Easy), Stratix (Medium), Terminus (Hard)
+- Choose your symbol (X or O) when playing against AI
+- Peer-to-peer friend matches with room codes and QR invites
+- Native desktop app via Tauri with embedded signaling server
+- Phone players can join by scanning a QR code from the desktop host
+- Cross-platform builds (Linux, macOS, Windows) via GitHub Actions
 
 ## Getting Started
 
 ### Prerequisites
 
-- Python 3.11+
-- [`uv`](https://github.com/astral-sh/uv) for dependency management
+- Node.js 20+
+- Rust toolchain (for desktop builds)
 
 ### Install dependencies
 
 ```bash
-uv sync --all-extras
+cd frontend
+npm install
 ```
 
-This installs the project in editable mode along with the optional `dev` dependencies (e.g., `pytest`).
-
-### Running the game locally
+### Running in the browser (dev mode)
 
 ```bash
-uv run uvicorn hyperxo.ui:app --reload
+cd frontend
+npx vite --host
 ```
 
-Navigate to <http://127.0.0.1:8000> to play in the browser. Use the difficulty selector to choose
-between the depth 1, 3, or 6 minimax opponents before starting a new game.
+Navigate to the URL shown in the terminal. AI games work fully in the browser.
+For multiplayer, you'll need the Tauri desktop app running (it includes the signaling server).
 
-### Playing with friends
+### Running the desktop app
 
-Select **Play with a friend** on the landing screen to enable peer-to-peer matchmaking. You can:
+```bash
+cd frontend
+npx tauri dev
+```
 
-- **Create a room** to generate a six-character invite code, shareable link, and QR code.
-- **Join a room** by entering an existing invite code or opening the shared link.
+Or build a release:
 
-All gameplay traffic flows through a direct WebRTC data channel between browsers; the FastAPI
-backend only coordinates the initial signaling handshake.
+```bash
+cd frontend
+npx tauri build
+```
+
+The built executable is in `frontend/src-tauri/target/release/bundle/`.
 
 ### Running tests
 
 ```bash
-uv run pytest
+cd frontend
+npx vitest run
 ```
 
-## Docker development environment
-
-A Docker setup is provided to run the application without installing Python locally.
-
-```bash
-docker compose up --build
-```
-
-The container exposes the FastAPI service on port 8000. Open <http://127.0.0.1:8000> in your
-browser after the container is running.
-
-## Project layout
+## Architecture
 
 ```
-.
-├── pyproject.toml        # Project metadata (managed by uv)
-├── src/hyperxo/          # Package source
-├── tests/                # Pytest suite
-├── docker-compose.yml    # Docker compose for local development
-└── Dockerfile            # Image definition
+frontend/
+  src/
+    engine/          # Client-side game engine + AI (TypeScript)
+      game.ts        # Board state, moves, Zobrist hashing, make/unmake
+      ai.ts          # Minimax with alpha-beta, TT, move ordering, evaluation
+    components/      # React UI components
+    api.ts           # Room signaling API (Tauri plugin or fetch)
+  src-tauri/         # Tauri desktop app (Rust)
+    src/
+      lib.rs         # App entry, Tauri commands
+      signaling.rs   # Embedded WebSocket signaling server (warp)
 ```
+
+### How it works
+
+- **AI games** run entirely client-side — no server needed
+- **Multiplayer** uses WebSocket signaling to connect two players:
+  - Desktop app: embedded Rust signaling server on port 29170
+  - Browser dev: proxied through Vite to a backend server
+- The desktop app's signaling server also serves the frontend, so a phone
+  can scan the QR code and load the game directly from the host
+

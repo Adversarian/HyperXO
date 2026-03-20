@@ -1,47 +1,51 @@
 # HyperXO Agent Guide
 
-This repository implements HyperXO: a FastAPI backend with a browser-based UI, a minimax AI, and
-peer-to-peer friend play powered by WebRTC data channels. Keep the following guidelines in mind
-when making changes.
+This repository implements HyperXO: a native desktop app (Tauri) with a React/TypeScript frontend,
+a client-side minimax AI, and peer-to-peer multiplayer via an embedded WebSocket signaling server.
 
 ## Architecture overview
-- `src/hyperxo/game.py` contains the authoritative HyperXO rules, board resolution, and cloning
-  utilities used by both the API and the AI. Preserve the pure, side-effect-free design of this
-  module.
-- `src/hyperxo/ai.py` houses the minimax implementation with depths 1, 3, and 6. When adjusting
-  heuristics or branching limits, ensure the public interface (`MinimaxAI.choose`) remains
-  deterministic and synchronous.
-- `src/hyperxo/ui.py` bundles the FastAPI app, REST endpoints, WebRTC signaling helpers, and the
-  single-page HTML/JS UI. Keep signaling (room creation, websocket relay, QR invites) and UI assets
-  colocated here unless the architecture is intentionally refactored into dedicated modules.
-- Package exports live in `src/hyperxo/__init__.py`, and the CLI entry point (`python -m hyperxo`)
-  should continue to boot the web server defined in `ui.py`.
+
+- `frontend/src/engine/game.ts` contains the authoritative game rules, board state, Zobrist hashing,
+  and make/unmake move support. All game logic runs client-side in the browser/webview.
+- `frontend/src/engine/ai.ts` houses the minimax AI with alpha-beta pruning, iterative deepening,
+  transposition table, and move ordering. Depths 3, 5, and 8 are the supported difficulty levels.
+- `frontend/src/components/` contains the React UI: menu, game board, lobby, multiplayer views.
+- `frontend/src/api.ts` handles room creation and WebSocket connections, with automatic detection
+  of Tauri vs browser mode. In Tauri, it uses Tauri commands and the WebSocket plugin; in the
+  browser, it uses standard fetch/WebSocket.
+- `frontend/src-tauri/` is the Tauri desktop app:
+  - `src/signaling.rs` — embedded warp WebSocket signaling server that also serves the built
+    frontend to phone browsers joining via QR code.
+  - `src/lib.rs` — Tauri commands for room creation and signaling info.
 
 ## Implementation guidelines
-- Maintain strict separation between game state mutations (confined to `HyperXOGame`) and transport
-  layers. Client or network code should never bypass the model APIs.
-- Preserve accessibility affordances in the web UI (ARIA labels, focus management) when updating
-  markup or replacing assets.
-- Peer-to-peer sessions rely on ephemeral in-memory room state; do not introduce long-lived storage
-  without updating this guide.
-- Favor modern, declarative CSS within the embedded UI template. Keep gradients and icon styling
-  consistent with the existing design language (light red crosses, light blue rings).
+
+- All game state mutations happen through `game.ts`. UI components should never modify board
+  state directly.
+- The AI uses `applyMove`/`undoMove` (make/unmake pattern) for zero-allocation search. Never
+  clone game state in the search tree.
+- The Tauri webview loads from `http://127.0.0.1:29170` (the embedded signaling server) to avoid
+  CSP and mixed-content issues with WebSocket connections.
+- WebSocket connections in Tauri use `tauri-plugin-websocket` (Rust-side) to bypass webview
+  restrictions. Browser clients use native WebSocket.
+- Player colors: X = cyan, O = rose. Won boards use opaque overlays.
 
 ## Tooling & testing
-- Dependencies are managed with [`uv`](https://github.com/astral-sh/uv). Run `uv sync --all-extras`
-  before development and `uv run --extra dev pytest` (or `uv run pytest`) to execute the suite.
-- Update `uv.lock` alongside `pyproject.toml` whenever dependencies change.
-- Tests belong under `tests/` and should use `pytest`. Cover new game mechanics, API routes, and UI
-  contract changes with unit or integration tests as appropriate.
 
-## Docker & local development
-- The Docker image is based on `ghcr.io/astral-sh/uv:python3.11-bookworm`. Ensure Dockerfile
-  adjustments keep parity with the uvicorn entry point (`hyperxo.ui:app`).
-- `docker-compose.yml` exposes the FastAPI service on port 8000 for local play; update compose
-  overrides if ports or environment variables change.
+- Frontend dependencies: `cd frontend && npm install`
+- Tests: `cd frontend && npx vitest run` (game engine + AI tests)
+- Desktop build: `cd frontend && npx tauri build` (requires Rust toolchain)
+- Dev server: `cd frontend && npx vite --host`
 
-## PR expectations
-- Summaries should mention UI, AI, signaling, or tooling modifications that affect gameplay.
-- Reference notable files or modules touched by the change and call out any migrations impacting
-  local development.
+## CI/CD
 
+- GitHub Actions workflow at `.github/workflows/release.yml` builds for Linux, macOS (ARM + Intel),
+  and Windows on every published release using `tauri-action`.
+
+## Desktop app details
+
+- Tauri config: `frontend/src-tauri/tauri.conf.json`
+- Signaling server port: 29170 (hardcoded in `lib.rs`)
+- The signaling server embeds the built frontend via `include_dir` at compile time
+- Room creation uses `ureq` from Rust to call the local signaling API
+- Local IP detection uses `local-ip-address` crate for QR invite URLs

@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "enables the default permissions",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "websocket:default",
+    {
+      "identifier": "websocket:allow-connect",
+      "allow": [
+        { "url": "ws://127.0.0.1:*" },
+        { "url": "ws://localhost:*" }
+      ]
+    }
+  ]
+}

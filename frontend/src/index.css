@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@keyframes logo-glow {
+  0%   { background-position: 0% 50%, 80% 20%; }
+  15%  { background-position: 40% 20%, 20% 80%; }
+  35%  { background-position: 100% 60%, 60% 10%; }
+  50%  { background-position: 60% 100%, 0% 50%; }
+  65%  { background-position: 20% 30%, 90% 90%; }
+  80%  { background-position: 80% 80%, 40% 30%; }
+  100% { background-position: 0% 50%, 80% 20%; }
+}
+
+.animate-logo-glow {
+  background:
+    radial-gradient(circle, #22d3ee, transparent 55%),
+    radial-gradient(circle, #fb7185, transparent 55%),
+    linear-gradient(135deg, #818cf8, #a78bfa, #818cf8);
+  background-size: 200% 200%, 200% 200%, 100% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: logo-glow 10s ease-in-out infinite;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.05);
+}
