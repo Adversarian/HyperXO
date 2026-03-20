@@ -213,6 +213,14 @@ function evaluateTerminal(ai: MinimaxAI, game: HyperXOGame, remainingDepth: numb
 }
 
 function evaluate(ai: MinimaxAI, game: HyperXOGame): number {
+  switch (game.mode) {
+    case 'sudden-death': return evaluateSuddenDeath(ai, game);
+    case 'misere': return evaluateMisere(ai, game);
+    default: return evaluateClassic(ai, game);
+  }
+}
+
+function evaluateClassic(ai: MinimaxAI, game: HyperXOGame): number {
   const me = ai.player;
   const opp: Player = me === 'X' ? 'O' : 'X';
 
@@ -260,6 +268,86 @@ function evaluate(ai: MinimaxAI, game: HyperXOGame): number {
 
     if (board.cells[4] === me) score += 0.3;
     else if (board.cells[4] === opp) score -= 0.3;
+  }
+
+  return score;
+}
+
+function evaluateSuddenDeath(ai: MinimaxAI, game: HyperXOGame): number {
+  const me = ai.player;
+  const opp: Player = me === 'X' ? 'O' : 'X';
+  let score = 0;
+
+  // Only micro-board threats matter — any board win ends the game
+  for (const board of game.boards) {
+    if (board.drawn) continue;
+
+    for (const [a, b, c] of WINNING_LINES) {
+      const trio = [board.cells[a], board.cells[b], board.cells[c]];
+      if (!trio.includes(opp)) {
+        const cnt = trio.filter(t => t === me).length;
+        if (cnt === 1) score += 2;
+        else if (cnt === 2) score += 15;
+      }
+      if (!trio.includes(me)) {
+        const cnt = trio.filter(t => t === opp).length;
+        if (cnt === 1) score -= 2;
+        else if (cnt === 2) score -= 15;
+      }
+    }
+
+    if (board.cells[4] === me) score += 0.5;
+    else if (board.cells[4] === opp) score -= 0.5;
+  }
+
+  return score;
+}
+
+function evaluateMisere(ai: MinimaxAI, game: HyperXOGame): number {
+  const me = ai.player;
+  const opp: Player = me === 'X' ? 'O' : 'X';
+  let score = 0;
+
+  // Macro line potential: INVERTED (your lines = danger)
+  const bb = bigBoardState(game);
+  for (const [a, b, c] of WINNING_LINES) {
+    const marks = [bb[a], bb[b], bb[c]];
+    if (marks.includes('G')) continue;
+    const m = marks.filter(x => x === me).length;
+    const o = marks.filter(x => x === opp).length;
+    if (m && o) continue;
+    if (m) score -= 4 ** m;
+    if (o) score += 4 ** o;
+  }
+
+  // Macro geometry: inverted
+  if (bb[4] === me) score -= 0.6;
+  else if (bb[4] === opp) score += 0.6;
+  for (const k of [0, 2, 6, 8]) {
+    if (bb[k] === me) score -= 0.3;
+    else if (bb[k] === opp) score += 0.3;
+  }
+
+  // Won boards: slightly negative (more boards = more macro risk)
+  for (const board of game.boards) {
+    if (board.winner === me) { score -= 8; continue; }
+    if (board.winner === opp) { score += 8; continue; }
+    if (board.drawn) continue;
+
+    // Micro threats: same direction (tactical board play still matters)
+    for (const [a, b, c] of WINNING_LINES) {
+      const trio = [board.cells[a], board.cells[b], board.cells[c]];
+      if (!trio.includes(opp)) {
+        const cnt = trio.filter(t => t === me).length;
+        if (cnt === 1) score += 1;
+        else if (cnt === 2) score += 3;
+      }
+      if (!trio.includes(me)) {
+        const cnt = trio.filter(t => t === opp).length;
+        if (cnt === 1) score -= 1;
+        else if (cnt === 2) score -= 3;
+      }
+    }
   }
 
   return score;

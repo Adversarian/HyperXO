@@ -1,11 +1,17 @@
 import { useState } from 'react';
-import type { Difficulty } from '../types';
+import type { Difficulty, GameMode } from '../types';
 
 interface Props {
-  onStartAI: (difficulty: Difficulty, symbol: 'X' | 'O', aiName: string) => void;
+  onStartAI: (difficulty: Difficulty, symbol: 'X' | 'O', aiName: string, mode: GameMode) => void;
   onHostGame: () => void;
   onJoinGame: () => void;
 }
+
+const MODES: { value: GameMode; label: string; desc: string; activeClass: string }[] = [
+  { value: 'classic', label: 'Classic', desc: 'Standard rules', activeClass: 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/25' },
+  { value: 'sudden-death', label: 'Sudden Death', desc: 'Win 1 board to win', activeClass: 'bg-orange-500 text-white shadow-lg shadow-orange-500/25' },
+  { value: 'misere', label: 'Misère', desc: 'Avoid 3 in a row', activeClass: 'bg-violet-500 text-white shadow-lg shadow-violet-500/25' },
+];
 
 const DIFFICULTIES: { value: Difficulty; label: string; name: string; desc: string; activeClass: string }[] = [
   { value: 3, label: 'Easy', name: 'Novax', desc: 'Casual play', activeClass: 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25' },
@@ -14,6 +20,7 @@ const DIFFICULTIES: { value: Difficulty; label: string; name: string; desc: stri
 ];
 
 export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
+  const [mode, setMode] = useState<GameMode>('classic');
   const [difficulty, setDifficulty] = useState<Difficulty>(3);
   const [symbol, setSymbol] = useState<'X' | 'O'>('X');
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -47,6 +54,26 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
       {/* AI Game */}
       <div className="w-full max-w-lg flex flex-col gap-5">
         <h2 className="text-zinc-300 text-lg font-medium text-center">Play vs. AI</h2>
+
+        <div className="grid grid-cols-3 gap-2">
+          {MODES.map((m) => (
+            <button
+              key={m.value}
+              onClick={() => setMode(m.value)}
+              className={`
+                flex flex-col items-center justify-center rounded-lg px-3 py-2.5 h-16 text-sm font-medium transition-all
+                ${
+                  mode === m.value
+                    ? m.activeClass
+                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'
+                }
+              `}
+            >
+              <div className="leading-tight">{m.label}</div>
+              <div className={`text-xs whitespace-nowrap mt-0.5 ${mode === m.value ? 'text-white/80' : 'text-zinc-500'}`}>{m.desc}</div>
+            </button>
+          ))}
+        </div>
 
         <div className="grid grid-cols-3 gap-2">
           {DIFFICULTIES.map((d) => (
@@ -93,7 +120,7 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
         </div>
 
         <button
-          onClick={() => onStartAI(difficulty, symbol, DIFFICULTIES.find(d => d.value === difficulty)!.name)}
+          onClick={() => onStartAI(difficulty, symbol, DIFFICULTIES.find(d => d.value === difficulty)!.name, mode)}
           className="w-full rounded-xl bg-indigo-500 px-6 py-3 text-white font-semibold hover:bg-indigo-400 transition-colors shadow-lg shadow-indigo-500/25 active:scale-[0.98]"
         >
           Start Game

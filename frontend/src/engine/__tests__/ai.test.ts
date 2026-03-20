@@ -97,3 +97,58 @@ describe('AI', () => {
     expect(moves.size).toBeGreaterThan(1);
   });
 });
+
+describe('AI sudden-death mode', () => {
+  it('takes immediate board win (game-winning move)', () => {
+    const game = createGame('sudden-death');
+    game.boards[0].cells[0] = 'X';
+    game.boards[0].cells[1] = 'X';
+    game.nextBoardIndex = 0;
+    game.currentPlayer = 'X';
+    rebuildHash(game);
+
+    const ai = createAI('X', 5);
+    const move = choose(ai, game);
+    expect(move).toEqual([0, 2]); // Complete top row → win game
+  });
+
+  it('blocks opponent board win', () => {
+    const game = createGame('sudden-death');
+    // O has 2 in a row on board 3, X is forced to board 3
+    game.boards[3].cells[0] = 'O';
+    game.boards[3].cells[1] = 'O';
+    game.nextBoardIndex = 3;
+    game.currentPlayer = 'X';
+    rebuildHash(game);
+
+    const ai = createAI('X', 5);
+    const move = choose(ai, game);
+    // X must block at (3, 2) to prevent O from winning the game
+    expect(move).toEqual([3, 2]);
+  });
+});
+
+describe('AI misère mode', () => {
+  it('avoids completing 3 boards in a row', () => {
+    const game = createGame('misere');
+    // X has boards 0 and 1. Board 2 has X at 0,1 — cell 2 would win board 2
+    // and complete top macro row, which means X LOSES.
+    for (const idx of [0, 1]) {
+      for (const c of [0, 1, 2]) game.boards[idx].cells[c] = 'X';
+      game.boards[idx].winner = 'X';
+    }
+    game.boards[2].cells[0] = 'X';
+    game.boards[2].cells[1] = 'X';
+    game.boards[2].cells[3] = 'O';
+    game.boards[2].cells[4] = 'O';
+    game.nextBoardIndex = 2;
+    game.currentPlayer = 'X';
+    rebuildHash(game);
+
+    const ai = createAI('X', 5);
+    const move = choose(ai, game);
+    // AI should NOT play (2, 2) — that would complete the macro line and lose
+    expect(move[0]).toBe(2); // forced to board 2
+    expect(move[1]).not.toBe(2);
+  });
+});

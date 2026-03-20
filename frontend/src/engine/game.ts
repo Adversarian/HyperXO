@@ -1,3 +1,4 @@
+export type GameMode = 'classic' | 'sudden-death' | 'misere';
 export type Player = 'X' | 'O';
 export type Cell = 'X' | 'O' | '';
 
@@ -68,9 +69,10 @@ export interface HyperXOGame {
   drawn: boolean;
   zobrist: Zobrist;
   zkey: number;
+  mode: GameMode;
 }
 
-export function createGame(): HyperXOGame {
+export function createGame(mode: GameMode = 'classic'): HyperXOGame {
   const zobrist = new Zobrist();
   const game: HyperXOGame = {
     boards: Array.from({ length: 9 }, () => createSmallBoard()),
@@ -80,6 +82,7 @@ export function createGame(): HyperXOGame {
     drawn: false,
     zobrist,
     zkey: 0,
+    mode,
   };
   game.zkey ^= zobrist.nbiKey(null);
   return game;
@@ -148,10 +151,31 @@ export function captureUndo(game: HyperXOGame, big: number): UndoState {
 // ---------- Mutations ----------
 
 function updateGlobalState(game: HyperXOGame): void {
+  if (game.mode === 'sudden-death') {
+    for (const b of game.boards) {
+      if (b.winner) {
+        game.winner = b.winner;
+        game.drawn = false;
+        return;
+      }
+    }
+    if (availableMoves(game).length === 0) {
+      game.winner = null;
+      game.drawn = true;
+    }
+    return;
+  }
+
+  // Classic and Misère both check for 3-in-a-row on the macro board
   const bb = bigBoardState(game);
   for (const [a, b, c] of WINNING_LINES) {
     if ((bb[a] === 'X' || bb[a] === 'O') && bb[a] === bb[b] && bb[b] === bb[c]) {
-      game.winner = bb[a] as Player;
+      if (game.mode === 'misere') {
+        // In Misère, completing 3 in a row means you LOSE
+        game.winner = bb[a] === 'X' ? 'O' : 'X';
+      } else {
+        game.winner = bb[a] as Player;
+      }
       game.drawn = false;
       return;
     }

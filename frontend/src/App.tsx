@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import type { Difficulty, Screen } from './types';
+import type { Difficulty, Screen, GameMode } from './types';
 import Menu from './components/Menu';
 import GameView from './components/GameView';
 import Lobby from './components/Lobby';
@@ -12,6 +12,7 @@ export default function App() {
   const [difficulty, setDifficulty] = useState<Difficulty>(3);
   const [playerSymbol, setPlayerSymbol] = useState<'X' | 'O'>('X');
   const [aiName, setAiName] = useState('Novax');
+  const [gameMode, setGameMode] = useState<GameMode>('classic');
   const [friendWs, setFriendWs] = useState<WebSocket | null>(null);
   const [friendRole, setFriendRole] = useState<'host' | 'guest'>('host');
   const [myName, setMyName] = useState('');
@@ -40,11 +41,12 @@ export default function App() {
   );
 
   const handleStartAI = useCallback(
-    (d: Difficulty, sym: 'X' | 'O', name: string) => {
+    (d: Difficulty, sym: 'X' | 'O', name: string, mode: GameMode) => {
       transitionTo(() => {
         setDifficulty(d);
         setPlayerSymbol(sym);
         setAiName(name);
+        setGameMode(mode);
         setScreen('game');
       });
     },
@@ -115,7 +117,7 @@ export default function App() {
         )}
 
         {screen === 'game' && (
-          <GameView difficulty={difficulty} playerSymbol={playerSymbol} aiName={aiName} onBack={goMenu} />
+          <GameView difficulty={difficulty} playerSymbol={playerSymbol} aiName={aiName} mode={gameMode} onBack={goMenu} />
         )}
 
         {screen === 'lobby-create' && !friendWs && (

@@ -27,4 +27,6 @@ export interface GameState {
 
 export type Difficulty = 3 | 5 | 8;
 
+export type GameMode = 'classic' | 'sudden-death' | 'misere';
+
 export type Screen = 'menu' | 'game' | 'lobby-create' | 'lobby-join';

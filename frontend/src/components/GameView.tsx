@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { Difficulty } from '../types';
-import type { GameState } from '../types';
+import type { Difficulty, GameMode, GameState } from '../types';
 import {
   createGame as createEngine,
   availableMoves,
@@ -16,8 +15,15 @@ interface Props {
   difficulty: Difficulty;
   playerSymbol: 'X' | 'O';
   aiName: string;
+  mode: GameMode;
   onBack: () => void;
 }
+
+const MODE_LABELS: Record<GameMode, string> = {
+  'classic': 'Classic',
+  'sudden-death': 'Sudden Death',
+  'misere': 'Misère',
+};
 
 function engineToGameState(engine: HyperXOGame, lastMove?: { player: string; boardIndex: number; cellIndex: number }): GameState {
   const moves = availableMoves(engine);
@@ -41,7 +47,7 @@ function engineToGameState(engine: HyperXOGame, lastMove?: { player: string; boa
   };
 }
 
-export default function GameView({ difficulty, playerSymbol, aiName, onBack }: Props) {
+export default function GameView({ difficulty, playerSymbol, aiName, mode, onBack }: Props) {
   const [game, setGame] = useState<GameState | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const engineRef = useRef<HyperXOGame | null>(null);
@@ -50,7 +56,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, onBack }: P
   const aiSymbol = playerSymbol === 'X' ? 'O' : 'X';
 
   const startNewGame = useCallback(() => {
-    const engine = createEngine();
+    const engine = createEngine(mode);
     const preset = DIFFICULTY_PRESETS[difficulty];
     const ai = createAI(aiSymbol, preset.depth, preset.blunderRate);
     engineRef.current = engine;
@@ -64,7 +70,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, onBack }: P
     } else {
       setGame(engineToGameState(engine));
     }
-  }, [difficulty, aiSymbol]);
+  }, [difficulty, aiSymbol, mode]);
 
   useEffect(() => { startNewGame(); }, [startNewGame]);
 
@@ -120,6 +126,9 @@ export default function GameView({ difficulty, playerSymbol, aiName, onBack }: P
           <span className={`text-sm font-medium ${playerSymbol === 'X' ? 'text-cyan-400' : 'text-rose-400'}`}>You ({playerSymbol})</span>
           <span className="text-zinc-600 text-xs">vs</span>
           <span className={`text-sm font-medium ${aiSymbol === 'X' ? 'text-cyan-400' : 'text-rose-400'}`}>{aiName} ({aiSymbol})</span>
+          {mode !== 'classic' && (
+            <span className="text-xs text-zinc-500 border border-zinc-700 rounded px-1.5 py-0.5">{MODE_LABELS[mode]}</span>
+          )}
         </div>
       </div>
 
