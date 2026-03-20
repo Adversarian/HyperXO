@@ -55,28 +55,33 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
       <div className="w-full max-w-lg flex flex-col gap-5">
         <h2 className="text-zinc-300 text-lg font-medium text-center">Play vs. AI</h2>
 
-        <div className="grid grid-cols-3 gap-2">
-          {MODES.map((m) => (
-            <button
-              key={m.value}
-              onClick={() => setMode(m.value)}
-              className={`
-                flex flex-col items-center justify-center rounded-lg px-3 py-2.5 h-16 text-sm font-medium transition-all
-                ${
-                  mode === m.value
-                    ? m.activeClass
-                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'
-                }
-              `}
-            >
-              <div className="leading-tight">{m.label}</div>
-              <div className={`text-xs whitespace-nowrap mt-0.5 ${mode === m.value ? 'text-white/80' : 'text-zinc-500'}`}>{m.desc}</div>
-            </button>
-          ))}
+        <div>
+          <p className="text-zinc-500 text-xs text-center mb-2">Game Mode</p>
+          <div className="grid grid-cols-3 gap-2">
+            {MODES.map((m) => (
+              <button
+                key={m.value}
+                onClick={() => setMode(m.value)}
+                className={`
+                  flex flex-col items-center justify-center rounded-lg px-3 py-2.5 h-16 text-sm font-medium transition-all
+                  ${
+                    mode === m.value
+                      ? m.activeClass
+                      : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'
+                  }
+                `}
+              >
+                <div className="leading-tight">{m.label}</div>
+                <div className={`text-xs whitespace-nowrap mt-0.5 ${mode === m.value ? 'text-white/80' : 'text-zinc-500'}`}>{m.desc}</div>
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
-          {DIFFICULTIES.map((d) => (
+        <div>
+          <p className="text-zinc-500 text-xs text-center mb-2">Difficulty</p>
+          <div className="grid grid-cols-3 gap-2">
+            {DIFFICULTIES.map((d) => (
             <button
               key={d.value}
               onClick={() => setDifficulty(d.value)}
@@ -93,6 +98,7 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
               <div className={`text-xs whitespace-nowrap mt-0.5 ${difficulty === d.value ? 'text-white/80' : 'text-zinc-500'}`}>{d.desc}</div>
             </button>
           ))}
+          </div>
         </div>
 
         <div className="flex items-center justify-center gap-3">
