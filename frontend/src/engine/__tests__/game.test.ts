@@ -144,10 +144,6 @@ describe('sudden-death mode', () => {
   });
 
   it('three boards in a row does NOT matter (only single board win)', () => {
-    const game = createGame('sudden-death');
-    // If we could have 3 boards won without triggering sudden death...
-    // In sudden-death, the game ends at the first board win, so 3 in a row
-    // is impossible. Verify that a single board win is sufficient.
     const game2 = createGame('sudden-death');
     game2.boards[4].cells[3] = 'O';
     game2.boards[4].cells[4] = 'O';
