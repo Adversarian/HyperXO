@@ -36,9 +36,9 @@ a client-side minimax AI, and peer-to-peer multiplayer via an embedded WebSocket
 
 ## Game modes
 
-- **Classic** — standard Ultimate Tic-Tac-Toe rules (3 boards in a row wins).
+- **Classic** — standard Ultimate Tic-Tac-Toe rules (complete a row, column, or diagonal of won boards on the macro grid).
 - **Sudden Death** — first player to win any single board wins the game.
-- **Misère** — completing 3 boards in a row means that player *loses*.
+- **Misère** — completing a row, column, or diagonal of won boards means that player *loses*.
 - **Gambits** — ban phase + draft-based tactical cards with active abilities and passive doctrines.
   Full AI support with card-aware evaluation, urgency-based timing, and mode-specific adjustments.
   See `GAMBITS.md` for the full design document.

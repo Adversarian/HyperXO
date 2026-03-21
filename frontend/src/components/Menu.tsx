@@ -214,7 +214,7 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
             <ol className="space-y-3 text-sm text-zinc-400 list-decimal list-outside ml-4">
               <li>
                 The board is a <span className="text-zinc-300">3x3 grid of smaller tic-tac-toe boards</span>.
-                Win three small boards in a row to win the game.
+                Win small boards, then line up three of them in a row, column, or diagonal on the big grid to win.
               </li>
               <li>
                 <span className="text-zinc-300">Where you play determines where your opponent must play next.</span>{' '}
@@ -226,7 +226,7 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
               </li>
               <li>
                 Win a small board the normal way — get <span className="text-cyan-400">three in a row</span>.
-                Then win three <em>boards</em> in a row on the big grid.
+                Then complete a <em>row, column, or diagonal</em> of won boards on the big grid.
               </li>
             </ol>
             <p className="mt-4 text-xs text-zinc-600">
