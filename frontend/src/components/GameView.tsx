@@ -337,7 +337,8 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         executeAiNormalMove(engine, ai, null, flowCard);
       } catch (e) { console.error('AI move error:', e); setAiThinking(false); }
     }, flowCard ? 800 : 500);
-  }, [aiSymbol, aiName, difficulty, triggerFlash, logEvent, syncCardContext, executeAiNormalMove]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- executeAiNormalMove is defined below (mutual recursion)
+  }, [aiSymbol, aiName, difficulty, triggerFlash, logEvent, syncCardContext]);
 
   const executeAiNormalMove = useCallback((
     engine: HyperXOGame,

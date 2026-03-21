@@ -51,7 +51,7 @@ interface TauriFakeWs {
 
 interface TauriWsMessage {
   type?: string;
-  data?: string;
+  data?: string | number[];
 }
 
 // Uses the Tauri WebSocket plugin which routes through Rust,
