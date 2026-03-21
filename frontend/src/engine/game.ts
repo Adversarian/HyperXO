@@ -149,6 +149,20 @@ export function captureUndo(game: HyperXOGame, big: number): UndoState {
   };
 }
 
+// ---------- Next-board sanitizer ----------
+
+/** If nextBoardIndex points to a resolved/full board, reset to null (free move). */
+export function sanitizeNextBoardIndex(game: HyperXOGame): void {
+  if (game.nextBoardIndex !== null) {
+    const nb = game.boards[game.nextBoardIndex];
+    if (nb.winner || nb.drawn || nb.condemned || nb.cells.every(c => c !== '')) {
+      game.zkey ^= game.zobrist.nbiKey(game.nextBoardIndex);
+      game.nextBoardIndex = null;
+      game.zkey ^= game.zobrist.nbiKey(null);
+    }
+  }
+}
+
 // ---------- Mutations ----------
 
 export function recalcBoard(board: SmallBoard): void {
@@ -168,16 +182,18 @@ export function recalcBoard(board: SmallBoard): void {
 }
 
 export function updateGlobalState(game: HyperXOGame): void {
+  // Reset previous result — card effects can revoke wins
+  game.winner = null;
+  game.drawn = false;
+
   if (game.mode === 'sudden-death') {
     for (const b of game.boards) {
       if (b.winner) {
         game.winner = b.winner;
-        game.drawn = false;
         return;
       }
     }
     if (availableMoves(game).length === 0) {
-      game.winner = null;
       game.drawn = true;
     }
     return;
@@ -188,17 +204,14 @@ export function updateGlobalState(game: HyperXOGame): void {
   for (const [a, b, c] of WINNING_LINES) {
     if ((bb[a] === 'X' || bb[a] === 'O') && bb[a] === bb[b] && bb[b] === bb[c]) {
       if (game.mode === 'misere') {
-        // In Misère, completing 3 in a row means you LOSE
         game.winner = bb[a] === 'X' ? 'O' : 'X';
       } else {
         game.winner = bb[a] as Player;
       }
-      game.drawn = false;
       return;
     }
   }
   if (availableMoves(game).length === 0) {
-    game.winner = null;
     game.drawn = true;
   }
 }

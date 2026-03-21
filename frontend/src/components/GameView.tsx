@@ -41,6 +41,7 @@ import {
 import BigBoard from './BigBoard';
 import GameStatus from './GameStatus';
 import CardTray from './CardTray';
+import CombatLog, { type LogEntry, createLogEntry } from './CombatLog';
 
 interface Props {
   difficulty: Difficulty;
@@ -71,10 +72,9 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   const [siegeThreats, setSiegeThreats] = useState<SiegeThreat[]>([]);
   const [flashBoards, setFlashBoards] = useState<Map<number, string>>(new Map());
   const [recallSource, setRecallSource] = useState<{ boardIdx: number; cellIdx: number } | null>(null);
-  const [aiNotification, setAiNotification] = useState<string | null>(null);
   const [aiPUDisplay, setAiPUDisplay] = useState<PowerUpState | null>(null);
+  const [combatLog, setCombatLog] = useState<LogEntry[]>([]);
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const notifTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const engineRef = useRef<HyperXOGame | null>(null);
   const aiRef = useRef<MinimaxAI | null>(null);
   const siegeRef = useRef<SiegeThreat[]>([]);
@@ -101,13 +101,8 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     }, 600);
   }, []);
 
-  const showAiNotification = useCallback((msg: string) => {
-    if (notifTimeoutRef.current) clearTimeout(notifTimeoutRef.current);
-    setAiNotification(msg);
-    notifTimeoutRef.current = setTimeout(() => {
-      setAiNotification(null);
-      notifTimeoutRef.current = null;
-    }, 2000);
+  const logEvent = useCallback((message: string, color = 'text-zinc-400') => {
+    setCombatLog(prev => [...prev.slice(-19), createLogEntry(message, color)]);
   }, []);
 
   /** Sync both players' remaining cards onto the AI's cardCtx so minimax eval is card-aware. */
@@ -121,10 +116,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   }, [draft, playerPU]);
 
   useEffect(() => {
-    return () => {
-      if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
-      if (notifTimeoutRef.current) clearTimeout(notifTimeoutRef.current);
-    };
+    return () => { if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current); };
   }, []);
 
   const updateSiege = useCallback((threats: SiegeThreat[]) => {
@@ -164,6 +156,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     const newlyWon = getNewlyWonBoards(engine, prevWinners);
     const aiWonBoard = newlyWon.some(w => w.winner === aiSymbol);
 
+    try {
     // AI siege refresh after AI's own move
     if (aiDoctrine === 'siege') {
       aiSiegeRef.current = refreshSiegeThreats(aiSiegeRef.current, engine, aiSymbol as Player);
@@ -194,36 +187,42 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         newlyWon.filter(w => w.winner === aiSymbol).map(w => w.i),
         aiSymbol === 'X' ? 'cyan' : 'rose',
       );
-      showAiNotification(`${aiName}: Momentum!`);
+      logEvent(`${aiName}: Momentum!`, 'text-amber-400');
       setGame(toGameState(engine, lastMove));
 
       setTimeout(() => {
-        if (engine.winner || engine.drawn) { setAiThinking(false); return; }
-        const move2 = choose(ai, engine);
-        const prevW2 = engine.boards.map(b => b.winner);
-        applyMove(engine, move2[0], move2[1]);
-        const lastMove2 = { player: aiSymbol, boardIndex: move2[0], cellIndex: move2[1] };
-        completeAfterAiMoveInner(engine, prevW2, lastMove2, hastePending);
-      }, 400);
+        try {
+          if (engine.winner || engine.drawn) { setAiThinking(false); return; }
+          ai.tt.clear(); // TT is stale after manual player switch
+          const move2 = choose(ai, engine);
+          const prevW2 = engine.boards.map(b => b.winner);
+          applyMove(engine, move2[0], move2[1]);
+          const lastMove2 = { player: aiSymbol, boardIndex: move2[0], cellIndex: move2[1] };
+          completeAfterAiMoveInner(engine, prevW2, lastMove2, hastePending);
+        } catch (e) { console.error('AI momentum error:', e); setAiThinking(false); }
+      }, 1200);
       return;
     }
 
     // AI flanking: any board won → AI auto-places bonus piece
     if (aiDoctrine === 'flanking' && newlyWon.length > 0 && !engine.winner && !engine.drawn) {
-      engine.currentPlayer = aiSymbol as Player;
-      engine.zkey ^= engine.zobrist.stmKey();
-      engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-      engine.nextBoardIndex = null;
-      engine.zkey ^= engine.zobrist.nbiKey(null);
-      const bonusMove = choose(ai, engine);
-      const prevW2 = engine.boards.map(b => b.winner);
-      applyMove(engine, bonusMove[0], bonusMove[1]);
-      const flankLastMove = { player: aiSymbol, boardIndex: bonusMove[0], cellIndex: bonusMove[1] };
-      triggerFlash(newlyWon.map(w => w.i), 'emerald');
-      showAiNotification(`${aiName}: Flanking!`);
-      // Defer haste like the player path to avoid giving AI 3 turns
-      completeAfterAiMoveInner(engine, prevW2, flankLastMove, hastePending);
-      return;
+      const moves = availableMoves(engine);
+      if (moves.length > 0) {
+        engine.currentPlayer = aiSymbol as Player;
+        engine.zkey ^= engine.zobrist.stmKey();
+        engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
+        engine.nextBoardIndex = null;
+        engine.zkey ^= engine.zobrist.nbiKey(null);
+        ai.tt.clear(); // TT is stale after manual state changes
+        const bonusMove = choose(ai, engine);
+        const prevW2 = engine.boards.map(b => b.winner);
+        applyMove(engine, bonusMove[0], bonusMove[1]);
+        const flankLastMove = { player: aiSymbol, boardIndex: bonusMove[0], cellIndex: bonusMove[1] };
+        triggerFlash(newlyWon.map(w => w.i), 'emerald');
+        logEvent(`${aiName}: Flanking!`, 'text-emerald-400');
+        completeAfterAiMoveInner(engine, prevW2, flankLastMove, hastePending);
+        return;
+      }
     }
 
     // Player flanking: any board won after AI move → player bonus piece
@@ -248,20 +247,27 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       setGame(toGameState(engine, lastMove));
 
       setTimeout(() => {
-        if (engine.winner || engine.drawn) { setAiThinking(false); return; }
-        const move2 = choose(ai, engine);
-        const prevW2 = engine.boards.map(b => b.winner);
-        applyMove(engine, move2[0], move2[1]);
-        const lastMove2 = { player: aiSymbol, boardIndex: move2[0], cellIndex: move2[1] };
-        completeAfterAiMoveInner(engine, prevW2, lastMove2, false);
-      }, 300);
+        try {
+          if (engine.winner || engine.drawn) { setAiThinking(false); return; }
+          ai.tt.clear(); // TT is stale after manual player switch
+          const move2 = choose(ai, engine);
+          const prevW2 = engine.boards.map(b => b.winner);
+          applyMove(engine, move2[0], move2[1]);
+          const lastMove2 = { player: aiSymbol, boardIndex: move2[0], cellIndex: move2[1] };
+          completeAfterAiMoveInner(engine, prevW2, lastMove2, false);
+        } catch (e) { console.error('AI haste error:', e); setAiThinking(false); }
+      }, 1000);
       return;
+    }
+
+    } catch (e) {
+      console.error('AI passive error:', e);
     }
 
     // Normal: player's turn
     setGame(toGameState(engine, lastMove));
     setAiThinking(false);
-  }, [aiSymbol, aiName, aiDoctrine, doctrine, playerSymbol, triggerFlash, showAiNotification, updateSiege]);
+  }, [aiSymbol, aiName, aiDoctrine, doctrine, playerSymbol, triggerFlash, logEvent, updateSiege]);
 
   // ---- Execute full AI turn (with card support) ----
 
@@ -277,7 +283,10 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     const depthLevel = DIFFICULTY_PRESETS[difficulty].depth;
 
     // Step 1: Decide card usage
-    const cardDecision = aiPU ? aiDecideCard(engine, aiPU, aiSymbol as Player, depthLevel) : null;
+    let cardDecision: AiCardDecision | null = null;
+    try {
+      cardDecision = aiPU ? aiDecideCard(engine, aiPU, aiSymbol as Player, depthLevel) : null;
+    } catch (e) { console.error('AI card decision error:', e); }
 
     let preCardWinners: (Player | null)[] | null = null;
     let flowCard: ActiveCard | null = null;
@@ -286,40 +295,50 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       if (isPrePlacementCard(cardDecision.card)) {
         // Pre-placement card: apply with delay for visual feedback
         preCardWinners = engine.boards.map(b => b.winner);
-        applyAiPreCard(engine, cardDecision);
-        useCard(aiPU!, cardDecision.card);
-        setAiPUDisplay({ ...aiPU! });
+        try { applyAiPreCard(engine, cardDecision); } catch (e) {
+          console.error('AI pre-card error:', e);
+          preCardWinners = null;
+          cardDecision = null;
+        }
+        if (cardDecision) {
+          useCard(aiPU!, cardDecision.card);
+          setAiPUDisplay({ ...aiPU! });
 
-        const flashB = getCardFlashBoards(cardDecision);
-        const flashC = getCardFlashColor(cardDecision.card);
-        showAiNotification(`${aiName} used ${CARD_CATALOG[cardDecision.card].name}!`);
-        if (flashB.length > 0) triggerFlash(flashB, flashC);
-        setGame(toGameState(engine));
+          const flashB = getCardFlashBoards(cardDecision);
+          const flashC = getCardFlashColor(cardDecision.card);
+          logEvent(`${aiName} used ${CARD_CATALOG[cardDecision.card].name}!`, 'text-indigo-400');
+          if (flashB.length > 0) triggerFlash(flashB, flashC);
+          setGame(toGameState(engine));
 
-        // Delay before normal move
-        setTimeout(() => {
-          if (engine.winner || engine.drawn) {
-            setGame(toGameState(engine));
-            setAiThinking(false);
-            return;
-          }
-          executeAiNormalMove(engine, ai, preCardWinners, null);
-        }, 600);
-        return;
+          // Delay before normal move
+          setTimeout(() => {
+            try {
+              if (engine.winner || engine.drawn) {
+                setGame(toGameState(engine));
+                setAiThinking(false);
+                return;
+              }
+              executeAiNormalMove(engine, ai, preCardWinners, null);
+            } catch (e) { console.error('AI move after card error:', e); setAiThinking(false); }
+          }, 1500);
+          return;
+        }
       } else {
         // Flow modifier: mark for later
         flowCard = cardDecision.card;
         useCard(aiPU!, cardDecision.card);
         setAiPUDisplay({ ...aiPU! });
-        showAiNotification(`${aiName} used ${CARD_CATALOG[cardDecision.card].name}!`);
+        logEvent(`${aiName} used ${CARD_CATALOG[cardDecision.card].name}!`, 'text-indigo-400');
       }
     }
 
-    // No pre-card delay needed
+    // Normal AI move (with flow card notification delay if applicable)
     setTimeout(() => {
-      executeAiNormalMove(engine, ai, null, flowCard);
-    }, 50);
-  }, [aiSymbol, aiName, difficulty, triggerFlash, showAiNotification, syncCardContext]);
+      try {
+        executeAiNormalMove(engine, ai, null, flowCard);
+      } catch (e) { console.error('AI move error:', e); setAiThinking(false); }
+    }, flowCard ? 800 : 500);
+  }, [aiSymbol, aiName, difficulty, triggerFlash, logEvent, syncCardContext]);
 
   const executeAiNormalMove = useCallback((
     engine: HyperXOGame,
@@ -334,6 +353,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     }
 
     const prevWinners = preCardWinners ?? engine.boards.map(b => b.winner);
+    if (preCardWinners) ai.tt.clear(); // TT is stale after pre-card state changes
     const move = choose(ai, engine);
     applyMove(engine, move[0], move[1]);
     const lastMove = { player: aiSymbol, boardIndex: move[0], cellIndex: move[1] };
@@ -345,6 +365,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
       engine.nextBoardIndex = move[0];
       engine.zkey ^= engine.zobrist.nbiKey(move[0]);
+      ai.tt.clear(); // TT is stale after manual player/nbi switch
       const move2 = choose(ai, engine);
       applyMove(engine, move2[0], move2[1]);
     }
@@ -373,12 +394,15 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
 
     setAiThinking(true);
     setTimeout(() => {
-      const move = choose(ai, engine);
-      const prevW = engine.boards.map(b => b.winner);
-      applyMove(engine, move[0], move[1]);
-      const lastMove = { player: aiSymbol, boardIndex: move[0], cellIndex: move[1] };
-      completeAfterAiMove(engine, prevW, lastMove, false);
-    }, 300);
+      try {
+        ai.tt.clear(); // TT is stale after manual state changes
+        const move = choose(ai, engine);
+        const prevW = engine.boards.map(b => b.winner);
+        applyMove(engine, move[0], move[1]);
+        const lastMove = { player: aiSymbol, boardIndex: move[0], cellIndex: move[1] };
+        completeAfterAiMove(engine, prevW, lastMove, false);
+      } catch (e) { console.error('AI resume error:', e); setAiThinking(false); }
+    }, 800);
   }, [aiSymbol, completeAfterAiMove]);
 
   // ---- Check passives after player's full turn, before AI responds ----
@@ -410,7 +434,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       aiSiegeRef.current = result.updated;
       if (result.claimed.length > 0) {
         triggerFlash(result.claimed.map(c => c.boardIdx), 'amber');
-        showAiNotification(`${aiName}: Siege claim!`);
+        logEvent(`${aiName}: Siege claim!`, 'text-amber-400');
       }
       if (engine.winner || engine.drawn) {
         setGame(toGameState(engine, lastMove));
@@ -442,7 +466,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       const bonusMove = choose(ai, engine);
       applyMove(engine, bonusMove[0], bonusMove[1]);
       triggerFlash(newlyWon.map(w => w.i), 'emerald');
-      showAiNotification(`${aiName}: Flanking!`);
+      logEvent(`${aiName}: Flanking!`, 'text-emerald-400');
       // Continue — the flanking bonus might have changed state
       // Recurse afterPlayerTurn to check for more passives
       afterPlayerTurn(engine, lastMove, engine.boards.map(b => b.winner));
@@ -474,7 +498,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
 
     setGame(toGameState(engine, lastMove));
     doAiResponse();
-  }, [playerSymbol, aiSymbol, aiName, doctrine, aiDoctrine, doAiResponse, triggerFlash, showAiNotification, updateSiege]);
+  }, [playerSymbol, aiSymbol, aiName, doctrine, aiDoctrine, doAiResponse, triggerFlash, logEvent, updateSiege]);
 
   // ---- Start new game ----
 
@@ -489,7 +513,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     setRecallSource(null);
     setTurnPhase('normal');
     updateSiege([]);
-    setAiNotification(null);
+    setCombatLog([]);
 
     // AI gambit setup
     if (draft) {
@@ -565,6 +589,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
             else if (card === 'swap') applySwap(engine, boardIndex);
             else applyShatter(engine, boardIndex);
             commitCard(card);
+            logEvent(`You used ${CARD_CATALOG[card].name}!`, 'text-cyan-400');
             if (engine.winner || engine.drawn) preCardWinnersRef.current = null;
             refreshGame();
             triggerFlash([boardIndex], card === 'swap' ? 'violet' : card === 'shatter' ? 'rose' : 'zinc');
@@ -584,6 +609,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
               preCardWinnersRef.current = engine.boards.map(b => b.winner);
               applyRecall(engine, recallSource.boardIdx, recallSource.cellIdx, boardIndex, cellIndex);
               commitCard('recall');
+              logEvent(`You used Recall!`, 'text-cyan-400');
               if (engine.winner || engine.drawn) preCardWinnersRef.current = null;
               setRecallSource(null);
               refreshGame();
@@ -600,6 +626,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
             if (card === 'overwrite') applyOverwrite(engine, boardIndex, cellIndex);
             else applySabotage(engine, boardIndex, cellIndex);
             commitCard(card);
+            logEvent(`You used ${CARD_CATALOG[card].name}!`, 'text-cyan-400');
             if (engine.winner || engine.drawn) preCardWinnersRef.current = null;
             refreshGame();
             triggerFlash([boardIndex], card === 'overwrite' ? 'rose' : 'violet');
@@ -700,6 +727,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
           engine.nextBoardIndex = boardIndex;
           engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
           commitCard('double-down');
+          logEvent('You used Double Down!', 'text-cyan-400');
           setTurnPhase('dd-second');
           setGame(toGameState(engine, lastMove));
           return;
@@ -712,6 +740,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
 
       if (activatingCard === 'haste' && !engine.winner && !engine.drawn) {
         commitCard('haste');
+        logEvent('You used Haste!', 'text-cyan-400');
         hasteFirstRef.current = true;
         afterPlayerTurn(engine, lastMove, prevWinners);
         return;
@@ -719,6 +748,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
 
       if (activatingCard === 'redirect' && !engine.winner && !engine.drawn) {
         commitCard('redirect');
+        logEvent('You used Redirect!', 'text-cyan-400');
         redirectPrevRef.current = { prevWinners, lastMove };
         setTurnPhase('redirect-pick');
         setGame(toGameState(engine, lastMove));
@@ -832,8 +862,10 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
                       ? { label: CARD_CATALOG[activatingCard].name, desc: 'Click an opponent piece to target' }
                       : null;
 
+  const hasGambits = !!(playerPU || aiPUDisplay);
+
   return (
-    <div className="flex flex-col items-center gap-4 sm:gap-6 px-2">
+    <div className="flex flex-col items-center gap-4 sm:gap-5 px-2">
       <div className="w-full flex items-center justify-between max-w-lg">
         <button
           onClick={onBack}
@@ -860,12 +892,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         labelO={playerSymbol === 'O' ? youLabel : aiLabel}
       />
 
-      {aiNotification && (
-        <div className="rounded-lg bg-indigo-500/10 border border-indigo-500/30 px-4 py-2 text-center">
-          <span className="text-indigo-400 text-sm font-semibold">{aiNotification}</span>
-        </div>
-      )}
-
       {phaseHint && (
         <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-4 py-2 text-center">
           <span className="text-amber-400 text-sm font-semibold">{phaseHint.label}</span>
@@ -873,45 +899,69 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         </div>
       )}
 
-      {aiPUDisplay && (
-        <div className="flex flex-col items-center gap-0.5">
-          <span className="text-xs text-zinc-600">{aiName}'s Gambits</span>
-          <CardTray
-            state={aiPUDisplay}
-            onActivate={() => {}}
-            activatingCard={null}
-            disabled={true}
-          />
-        </div>
-      )}
+      {/* Main area: side cards on wide screens, stacked on mobile */}
+      <div className={hasGambits
+        ? 'flex flex-col lg:flex-row lg:items-start lg:gap-4 w-full max-w-4xl'
+        : 'flex flex-col items-center'
+      }>
+        {/* Left panel: AI cards (lg: side, mobile: above board) */}
+        {aiPUDisplay && (
+          <div className="lg:w-36 shrink-0 flex flex-col items-center gap-1 mb-3 lg:mb-0 lg:pt-8">
+            <span className="text-xs text-zinc-600">{aiName}</span>
+            <div className="hidden lg:block w-full">
+              <CardTray state={aiPUDisplay} onActivate={() => {}} activatingCard={null} disabled={true} vertical />
+            </div>
+            <div className="lg:hidden">
+              <CardTray state={aiPUDisplay} onActivate={() => {}} activatingCard={null} disabled={true} />
+            </div>
+          </div>
+        )}
 
-      <BigBoard
-        game={game}
-        onCellClick={handleCellClick}
-        disabled={aiThinking || (!targeting && game.currentPlayer === aiSymbol)}
-        targeting={targeting}
-        flashBoards={flashBoards.size > 0 ? flashBoards : undefined}
-        siegeCells={siegeCellsMap}
-      />
-
-      {playerPU && (
-        <div className="flex flex-col items-center gap-1">
-          <CardTray
-            state={playerPU}
-            onActivate={handleActivateCard}
-            activatingCard={activatingCard}
-            disabled={!isPlayerTurn || turnPhase !== 'normal'}
+        {/* Center: board + log */}
+        <div className="flex flex-col items-center gap-3 flex-1 min-w-0">
+          <BigBoard
+            game={game}
+            onCellClick={handleCellClick}
+            disabled={aiThinking || (!targeting && game.currentPlayer === aiSymbol)}
+            targeting={targeting}
+            flashBoards={flashBoards.size > 0 ? flashBoards : undefined}
+            siegeCells={siegeCellsMap}
           />
-          {activatingCard && (
-            <button
-              onClick={cancelActivation}
-              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              Cancel
-            </button>
-          )}
+          {hasGambits && <CombatLog entries={combatLog} />}
         </div>
-      )}
+
+        {/* Right panel: Player cards (lg: side, mobile: below board) */}
+        {playerPU && (
+          <div className="lg:w-36 shrink-0 flex flex-col items-center gap-1 mt-3 lg:mt-0 lg:pt-8">
+            <span className="text-xs text-zinc-600">You</span>
+            <div className="hidden lg:block w-full">
+              <CardTray
+                state={playerPU}
+                onActivate={handleActivateCard}
+                activatingCard={activatingCard}
+                disabled={!isPlayerTurn || turnPhase !== 'normal'}
+                vertical
+              />
+            </div>
+            <div className="lg:hidden">
+              <CardTray
+                state={playerPU}
+                onActivate={handleActivateCard}
+                activatingCard={activatingCard}
+                disabled={!isPlayerTurn || turnPhase !== 'normal'}
+              />
+            </div>
+            {activatingCard && (
+              <button
+                onClick={cancelActivation}
+                className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       {isGameOver && (
         <button

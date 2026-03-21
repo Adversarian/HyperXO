@@ -55,7 +55,7 @@ export default function SmallBoard({
         : 'bg-zinc-600/40';
 
   return (
-    <div className={`relative grid grid-cols-3 grid-rows-3 gap-px sm:gap-0.5 rounded-lg sm:rounded-xl p-1 sm:p-1.5 transition-all duration-200 ${bgColor}`}>
+    <div className={`relative grid grid-cols-3 grid-rows-3 gap-0.5 sm:gap-1 rounded-lg sm:rounded-xl p-1 sm:p-1.5 transition-all duration-200 ${bgColor}`}>
       {/* Won/drawn overlay */}
       {resolved && !targetMode && (
         <div className={`absolute inset-0 z-10 flex items-center justify-center rounded-xl ${

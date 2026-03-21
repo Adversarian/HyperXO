@@ -13,18 +13,31 @@ interface Props {
   onActivate: (card: ActiveCard) => void;
   activatingCard: ActiveCard | null;
   disabled: boolean;
+  vertical?: boolean;
 }
 
-export default function CardTray({ state, onActivate, activatingCard, disabled }: Props) {
+export default function CardTray({ state, onActivate, activatingCard, disabled, vertical }: Props) {
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const actives = getAvailableCards(state);
   const allActives: ActiveCard[] = [state.draft.strike, state.draft.tactics, state.draft.disruption];
   const doctrine = CARD_CATALOG[state.draft.doctrine];
   const doctrineColors = CATEGORY_COLORS.doctrine;
 
+  const wrapClass = vertical
+    ? 'flex flex-col items-stretch gap-1.5 w-full'
+    : 'flex items-center gap-1.5 sm:gap-2 flex-wrap justify-center';
+
+  const cardClass = vertical
+    ? 'flex flex-col items-center rounded-lg px-2 py-1.5 ring-1 transition-all text-xs w-full'
+    : 'flex flex-col items-center rounded-lg px-3 py-2 sm:px-4 sm:py-2.5 ring-1 transition-all text-xs sm:text-sm min-w-[4.5rem] sm:min-w-[5.5rem]';
+
+  const dividerClass = vertical
+    ? 'h-px w-full bg-zinc-700 my-0.5'
+    : 'w-px h-8 bg-zinc-700 mx-0.5';
+
   return (
-    <div className="flex flex-col items-center gap-1.5 w-full max-w-lg">
-      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-center">
+    <div className={vertical ? 'flex flex-col items-stretch gap-1.5 w-full' : 'flex flex-col items-center gap-1.5 w-full max-w-lg'}>
+      <div className={wrapClass}>
         {allActives.map(cardId => {
           const card = CARD_CATALOG[cardId];
           const colors = CATEGORY_COLORS[card.category];
@@ -46,7 +59,7 @@ export default function CardTray({ state, onActivate, activatingCard, disabled }
               }}
               disabled={used}
               className={`
-                flex flex-col items-center rounded-lg px-3 py-2 sm:px-4 sm:py-2.5 ring-1 transition-all text-xs sm:text-sm min-w-[4.5rem] sm:min-w-[5.5rem]
+                ${cardClass}
                 ${used
                   ? `bg-zinc-900 ring-zinc-800 ${colors.used} line-through opacity-40`
                   : isActivating
@@ -59,7 +72,7 @@ export default function CardTray({ state, onActivate, activatingCard, disabled }
             >
               <span className="font-semibold leading-tight">{card.name}</span>
               {isExpanded && !used ? (
-                <span className={`text-[10px] sm:text-xs mt-0.5 opacity-80 max-w-[8rem] text-center leading-snug`}>
+                <span className="text-[10px] sm:text-xs mt-0.5 opacity-80 max-w-[8rem] text-center leading-snug">
                   {card.description}
                 </span>
               ) : (
@@ -72,11 +85,11 @@ export default function CardTray({ state, onActivate, activatingCard, disabled }
           );
         })}
 
-        <div className="w-px h-8 bg-zinc-700 mx-0.5" />
+        <div className={dividerClass} />
 
         <button
           onClick={() => setExpandedCard(expandedCard === 'doctrine' ? null : 'doctrine')}
-          className={`flex flex-col items-center rounded-lg px-3 py-2 sm:px-4 sm:py-2.5 ring-1 ${doctrineColors.bg} ${doctrineColors.ring} ${doctrineColors.text} text-xs sm:text-sm min-w-[4.5rem] sm:min-w-[5.5rem]`}
+          className={`${cardClass} ${doctrineColors.bg} ${doctrineColors.ring} ${doctrineColors.text}`}
         >
           <span className="font-semibold leading-tight">{doctrine.name}</span>
           {expandedCard === 'doctrine' ? (

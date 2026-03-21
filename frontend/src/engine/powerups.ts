@@ -4,6 +4,7 @@ import {
   WINNING_LINES,
   recalcBoard,
   updateGlobalState,
+  sanitizeNextBoardIndex,
 } from './game';
 
 // ---- Card types ----
@@ -271,6 +272,7 @@ export function applyRecall(
   game.zkey ^= game.zobrist.pieceKey(toBoard, toCell, player);
   recalcBoard(dst);
   updateGlobalState(game);
+  sanitizeNextBoardIndex(game);
 }
 
 // Sabotage: remove one opponent piece
@@ -285,6 +287,7 @@ export function applySabotage(game: HyperXOGame, boardIdx: number, cellIdx: numb
 
   recalcBoard(board);
   updateGlobalState(game);
+  sanitizeNextBoardIndex(game);
 }
 
 // Overwrite: replace one opponent piece with yours
@@ -301,6 +304,7 @@ export function applyOverwrite(game: HyperXOGame, boardIdx: number, cellIdx: num
 
   recalcBoard(board);
   updateGlobalState(game);
+  sanitizeNextBoardIndex(game);
 }
 
 // Swap: exchange all X↔O on a board
@@ -323,6 +327,7 @@ export function applySwap(game: HyperXOGame, boardIdx: number): void {
 
   recalcBoard(board);
   updateGlobalState(game);
+  sanitizeNextBoardIndex(game);
 }
 
 // Shatter: wipe all pieces from a board, revoke win
@@ -341,6 +346,7 @@ export function applyShatter(game: HyperXOGame, boardIdx: number): void {
   board.winner = null;
   board.drawn = false;
   updateGlobalState(game);
+  sanitizeNextBoardIndex(game);
 }
 
 // Condemn: permanently remove a board from play
@@ -452,4 +458,5 @@ export function applySiegeClaim(game: HyperXOGame, boardIdx: number, cellIdx: nu
   game.zkey ^= game.zobrist.pieceKey(boardIdx, cellIdx, player);
   recalcBoard(board);
   updateGlobalState(game);
+  sanitizeNextBoardIndex(game);
 }
