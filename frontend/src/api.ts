@@ -49,11 +49,6 @@ interface TauriFakeWs {
   _onclose?: EventListener | null;
 }
 
-interface TauriWsMessage {
-  type?: string;
-  data?: string | number[];
-}
-
 // Uses the Tauri WebSocket plugin which routes through Rust,
 // bypassing webview's mixed-content/CSP restrictions.
 function connectRoomTauri(roomId: string): WebSocket {
@@ -112,7 +107,7 @@ function connectRoomTauri(roomId: string): WebSocket {
 
   // Connect via Tauri plugin
   import('@tauri-apps/plugin-websocket').then(({ default: TauriWebSocket }) => {
-    TauriWebSocket.connect(url).then((tauriWs: { send: (data: string) => void; disconnect: () => void; addListener: (fn: (msg: string | TauriWsMessage) => void) => void }) => {
+    TauriWebSocket.connect(url).then((tauriWs) => {
       ws.readyState = WebSocket.OPEN;
 
       ws.send = (data: string) => {
@@ -125,7 +120,7 @@ function connectRoomTauri(roomId: string): WebSocket {
         emit('close');
       };
 
-      tauriWs.addListener((msg: string | TauriWsMessage) => {
+      tauriWs.addListener((msg) => {
         if (typeof msg === 'string') {
           emit('message', msg);
         } else if (msg.type === 'Close') {
