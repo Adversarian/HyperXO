@@ -26,6 +26,10 @@ jobs:
         working-directory: frontend
         run: npx tsc --noEmit
 
+      - name: Lint
+        working-directory: frontend
+        run: npx eslint . --max-warnings 50
+
       - name: Run tests
         working-directory: frontend
         run: npx vitest run

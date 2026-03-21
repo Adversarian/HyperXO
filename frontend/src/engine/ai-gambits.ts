@@ -14,10 +14,6 @@ import {
   type PowerUpDraft,
   type PowerUpState,
   type ActiveCard,
-  type StrikeCard,
-  type TacticsCard,
-  type DisruptionCard,
-  type DoctrineCard,
   type PowerUpCard,
   STRIKE_CARDS,
   TACTICS_CARDS,
@@ -32,12 +28,12 @@ import {
   applyShatter,
   applyCondemn,
 } from './powerups';
-import { evaluateForPlayer, choose, createAI, type MinimaxAI, type CardContext } from './ai';
+import { evaluateForPlayer, choose, createAI } from './ai';
 
 // ---- Snapshot / Restore (for simulating card effects) ----
 
 interface GameSnapshot {
-  cells: Cell[][];
+  cells: ('X' | 'O' | '')[][];
   winners: (Player | null)[];
   drawn: boolean[];
   condemned: boolean[];
@@ -473,7 +469,7 @@ function evalHaste(game: HyperXOGame, aiPlayer: Player, baseScore: number): numb
  * Value = (opponent's score on worst board) - (opponent's score on best board).
  * Higher spread = redirect is more valuable.
  */
-function evalRedirect(game: HyperXOGame, aiPlayer: Player, baseScore: number): number {
+function evalRedirect(game: HyperXOGame, aiPlayer: Player, _baseScore: number): number {
   const opponent: Player = aiPlayer === 'X' ? 'O' : 'X';
   const snap = snapshot(game);
 
@@ -511,102 +507,6 @@ function evalRedirect(game: HyperXOGame, aiPlayer: Player, baseScore: number): n
   // Convert to AI improvement: opponent being on their worst board vs natural
   // is worth roughly half the spread (since natural direction is random-ish, not always best)
   return spread * 0.5;
-}
-
-// ---- Random target selection (for easy AI) ----
-
-function randomCardTarget(
-  game: HyperXOGame, card: ActiveCard, aiPlayer: Player,
-): AiCardDecision | null {
-  const opponent: Player = aiPlayer === 'X' ? 'O' : 'X';
-
-  switch (card) {
-    case 'overwrite': {
-      const targets: { b: number; c: number }[] = [];
-      for (let bi = 0; bi < 9; bi++) {
-        const b = game.boards[bi];
-        if (b.condemned || b.winner || b.drawn) continue;
-        for (let ci = 0; ci < 9; ci++) {
-          if (b.cells[ci] === opponent) targets.push({ b: bi, c: ci });
-        }
-      }
-      if (!targets.length) return null;
-      const t = targets[Math.floor(Math.random() * targets.length)];
-      return { card, boardIdx: t.b, cellIdx: t.c };
-    }
-    case 'sabotage': {
-      const targets: { b: number; c: number }[] = [];
-      for (let bi = 0; bi < 9; bi++) {
-        const b = game.boards[bi];
-        if (b.condemned) continue;
-        for (let ci = 0; ci < 9; ci++) {
-          if (b.cells[ci] === opponent) targets.push({ b: bi, c: ci });
-        }
-      }
-      if (!targets.length) return null;
-      const t = targets[Math.floor(Math.random() * targets.length)];
-      return { card, boardIdx: t.b, cellIdx: t.c };
-    }
-    case 'recall': {
-      const sources: { b: number; c: number }[] = [];
-      for (let bi = 0; bi < 9; bi++) {
-        const b = game.boards[bi];
-        if (b.condemned || b.winner || b.drawn) continue;
-        for (let ci = 0; ci < 9; ci++) {
-          if (b.cells[ci] === aiPlayer) sources.push({ b: bi, c: ci });
-        }
-      }
-      if (!sources.length) return null;
-      const src = sources[Math.floor(Math.random() * sources.length)];
-      const dests: { b: number; c: number }[] = [];
-      for (let bi = 0; bi < 9; bi++) {
-        if (bi === src.b) continue;
-        const b = game.boards[bi];
-        if (b.condemned || b.winner || b.drawn) continue;
-        for (let ci = 0; ci < 9; ci++) {
-          if (b.cells[ci] === '') dests.push({ b: bi, c: ci });
-        }
-      }
-      if (!dests.length) return null;
-      const dst = dests[Math.floor(Math.random() * dests.length)];
-      return { card, fromBoard: src.b, fromCell: src.c, toBoard: dst.b, toCell: dst.c };
-    }
-    case 'swap': {
-      const targets: number[] = [];
-      for (let bi = 0; bi < 9; bi++) {
-        const b = game.boards[bi];
-        if (b.condemned || b.winner || b.drawn) continue;
-        if (b.cells.some(c => c !== '')) targets.push(bi);
-      }
-      if (!targets.length) return null;
-      return { card, boardIdx: targets[Math.floor(Math.random() * targets.length)] };
-    }
-    case 'shatter': {
-      const targets: number[] = [];
-      for (let bi = 0; bi < 9; bi++) {
-        const b = game.boards[bi];
-        if (b.condemned) continue;
-        if (b.winner === aiPlayer) continue;
-        if (b.cells.some(c => c !== '') || b.winner) targets.push(bi);
-      }
-      if (!targets.length) return null;
-      return { card, boardIdx: targets[Math.floor(Math.random() * targets.length)] };
-    }
-    case 'condemn': {
-      const targets: number[] = [];
-      for (let bi = 0; bi < 9; bi++) {
-        const b = game.boards[bi];
-        if (b.winner || b.drawn || b.condemned) continue;
-        targets.push(bi);
-      }
-      if (!targets.length) return null;
-      return { card, boardIdx: targets[Math.floor(Math.random() * targets.length)] };
-    }
-    case 'double-down':
-    case 'haste':
-    case 'redirect':
-      return { card };
-  }
 }
 
 // ---- Main card decision function ----

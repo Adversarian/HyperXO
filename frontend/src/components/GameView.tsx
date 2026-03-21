@@ -3,7 +3,7 @@ import type { Difficulty, GameMode, GameState, TurnPhase, MoveEntry } from '../t
 import type { PowerUpDraft, PowerUpState, ActiveCard, PowerUpCard, SiegeThreat } from '../engine/powerups';
 import {
   createPowerUpState,
-  useCard,
+  useCard as markCardUsed,
   getAvailableCards,
   CARD_CATALOG,
   applyRecall,
@@ -26,9 +26,8 @@ import {
 } from '../engine/game';
 import { engineToGameState, isBoardLive, getNewlyWonBoards } from '../engine/utils';
 import { createAI, choose, DIFFICULTY_PRESETS } from '../engine/ai';
-import type { MinimaxAI, CardContext } from '../engine/ai';
+import type { MinimaxAI } from '../engine/ai';
 import {
-  aiBan as generateAiBan,
   aiDraft as generateAiDraft,
   aiDecideCard,
   isPrePlacementCard,
@@ -301,7 +300,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
           cardDecision = null;
         }
         if (cardDecision) {
-          useCard(aiPU!, cardDecision.card);
+          markCardUsed(aiPU!, cardDecision.card);
           setAiPUDisplay({ ...aiPU! });
 
           const flashB = getCardFlashBoards(cardDecision);
@@ -326,7 +325,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       } else {
         // Flow modifier: mark for later
         flowCard = cardDecision.card;
-        useCard(aiPU!, cardDecision.card);
+        markCardUsed(aiPU!, cardDecision.card);
         setAiPUDisplay({ ...aiPU! });
         logEvent(`${aiName} used ${CARD_CATALOG[cardDecision.card].name}!`, 'text-indigo-400');
       }
@@ -550,7 +549,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
 
   const commitCard = useCallback((card: ActiveCard) => {
     if (!playerPU) return;
-    useCard(playerPU, card);
+    markCardUsed(playerPU, card);
     setPlayerPU({ ...playerPU });
     setActivatingCard(null);
   }, [playerPU]);

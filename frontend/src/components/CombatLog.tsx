@@ -7,6 +7,7 @@ export interface LogEntry {
 }
 
 let _nextId = 0;
+// eslint-disable-next-line react-refresh/only-export-components
 export function createLogEntry(message: string, color = 'text-zinc-400'): LogEntry {
   return { id: _nextId++, message, color };
 }

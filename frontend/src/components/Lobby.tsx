@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { PowerUpDraft } from '../engine/powerups';
 import { QRCodeSVG } from 'qrcode.react';
 import { createRoom, connectRoom } from '../api';
 
@@ -20,7 +19,7 @@ export default function Lobby({ mode, initialRoomId, onBack, onGameStart }: Prop
   const [copied, setCopied] = useState(false);
   const [gambits, setGambits] = useState(false);
   const gambitsRef = useRef(false);
-  gambitsRef.current = gambits;
+  gambitsRef.current = gambits; // eslint-disable-line
   const wsRef = useRef<WebSocket | null>(null);
   const roleRef = useRef<'host' | 'guest' | null>(null);
   const nameRef = useRef('');

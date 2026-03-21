@@ -31,7 +31,7 @@ export default function DraftScreen({ onReady, onBack, banned: externalBans }: P
   const allBans = new Set<string>(externalBans ?? []);
   if (myBan) allBans.add(myBan);
 
-  const select = (category: PowerUpCategory, cardId: PowerUpCard) => {
+  const select = (category: string, cardId: PowerUpCard) => {
     setPicks(prev => ({ ...prev, [category]: cardId }));
   };
 
@@ -39,10 +39,6 @@ export default function DraftScreen({ onReady, onBack, banned: externalBans }: P
 
   // ---- Ban Phase ----
   if (phase === 'ban') {
-    const allCards: PowerUpCard[] = [
-      ...STRIKE_CARDS, ...TACTICS_CARDS, ...DISRUPTION_CARDS, ...DOCTRINE_CARDS,
-    ];
-
     return (
       <div className="flex flex-col items-center gap-6 px-4 max-w-4xl mx-auto">
         <div className="w-full flex items-center justify-between">

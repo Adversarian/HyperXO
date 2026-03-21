@@ -9,7 +9,34 @@ permissions:
   contents: write
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: frontend
+        run: npx eslint . --max-warnings 50
+
+      - name: Run tests
+        working-directory: frontend
+        run: npx vitest run
+
   build:
+    needs: check
     strategy:
       fail-fast: false
       matrix:

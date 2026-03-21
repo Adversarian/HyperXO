@@ -3,7 +3,7 @@ import type { GameState, TurnPhase, MoveEntry } from '../types';
 import type { PowerUpDraft, PowerUpState, ActiveCard, PowerUpCard, SiegeThreat } from '../engine/powerups';
 import {
   createPowerUpState,
-  useCard,
+  useCard as markCardUsed,
   CARD_CATALOG,
   applyRecall,
   applySabotage,
@@ -370,7 +370,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
   const commitMyCard = useCallback(
     (card: ActiveCard) => {
       if (!myPURef.current) return;
-      useCard(myPURef.current, card);
+      markCardUsed(myPURef.current, card);
       setMyPU({ ...myPURef.current });
       setActivatingCard(null);
     },
@@ -691,7 +691,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         else if (card === 'redirect') pendingRef.current.opponentCard = 'redirect';
 
         // Mark card as used in opponent's state
-        if (opponentPURef.current) useCard(opponentPURef.current, card);
+        if (opponentPURef.current) markCardUsed(opponentPURef.current, card);
 
         // Show notice
         if (!['double-down', 'haste', 'redirect'].includes(card)) {

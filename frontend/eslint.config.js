@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'src-tauri']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -18,6 +18,17 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+    },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+  // Disable react-hooks rules for non-React files (engine code has useCard which is not a hook)
+  {
+    files: ['src/engine/**/*.ts', 'src/engine/**/*.test.ts'],
+    rules: {
+      'react-hooks/rules-of-hooks': 'off',
     },
   },
 ])

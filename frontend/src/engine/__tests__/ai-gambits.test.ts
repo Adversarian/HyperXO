@@ -1,11 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createGame, applyMove, availableMoves, type HyperXOGame, type Player } from '../game';
+import { describe, it, expect } from 'vitest';
+import { createGame, applyMove, type HyperXOGame } from '../game';
 import {
   createPowerUpState,
-  createDefaultDraft,
-  getAvailableCards,
   useCard,
-  type PowerUpState,
   type PowerUpDraft,
   type ActiveCard,
   STRIKE_CARDS,
@@ -25,7 +22,6 @@ import {
   aiRedirectTarget,
   snapshot,
   restore,
-  type AiCardDecision,
 } from '../ai-gambits';
 import { evaluateForPlayer } from '../ai';
 
@@ -756,11 +752,8 @@ describe('edge cases', () => {
 
     const draft = makeDraft();
     const puState = createPowerUpState(draft);
-    const decision = aiDecideCard(game, puState, 'X', 8);
-
-    // Should return null (no valid targets for any card)
-    // Note: haste/redirect might still be "valid" but there are no moves
-    // Since game should be drawn with all condemned, winner check prevents usage
+    // Should not throw (game is effectively over with all condemned boards)
+    aiDecideCard(game, puState, 'X', 8);
   });
 
   it('overwrite does not target own pieces', () => {

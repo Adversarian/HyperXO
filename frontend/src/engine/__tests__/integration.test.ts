@@ -35,11 +35,9 @@ import {
   advanceSiegeThreats,
   type PowerUpState,
   type PowerUpDraft,
-  type ActiveCard,
   type SiegeThreat,
 } from '../powerups';
 import {
-  aiDraft,
   aiDecideCard,
   applyAiPreCard,
   aiRedirectTarget,
@@ -718,7 +716,7 @@ describe('TT poisoning - regression', () => {
     game.nextBoardIndex = 0;
 
     const ai = createAI('X', 5, 0);
-    const move1 = choose(ai, game);
+    choose(ai, game); // Build TT entries
 
     // Overwrite O at cell 2 → now cell 2 is X
     applyOverwrite(game, 0, 2);
@@ -832,7 +830,7 @@ describe('Passive trigger chains', () => {
     game.nextBoardIndex = null;
     syncZkey(game);
 
-    let siegeThreats: SiegeThreat[] = [
+    const siegeThreats: SiegeThreat[] = [
       { boardIdx: 0, blockingCell: 2, turnsUnblocked: 2 }, // 1 more turn to claim
     ];
     const oMoves = availableMoves(game);
@@ -843,7 +841,7 @@ describe('Passive trigger chains', () => {
     }
 
     // Advance siege
-    const { updated, claimed } = advanceSiegeThreats(siegeThreats, game, 'X');
+    const { claimed } = advanceSiegeThreats(siegeThreats, game, 'X');
 
     expect(claimed.length).toBe(1);
     expect(claimed[0]).toEqual({ boardIdx: 0, cellIdx: 2 });
@@ -1011,7 +1009,7 @@ describe('Potential hang scenarios', () => {
   it('AI handles near-full board without hanging', () => {
     const game = createGame();
     // Fill most cells, leaving just a few empty
-    const pattern = ['X', 'O', 'X', 'O', 'X', 'O', 'X', 'O', ''];
+    const pattern: ('X' | 'O' | '')[] = ['X', 'O', 'X', 'O', 'X', 'O', 'X', 'O', ''];
     for (let bi = 0; bi < 8; bi++) {
       game.boards[bi].cells = [...pattern];
       recalcBoard(game.boards[bi]);

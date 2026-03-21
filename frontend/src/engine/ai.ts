@@ -70,8 +70,8 @@ export function choose(ai: MinimaxAI, game: HyperXOGame): [number, number] {
   const ASPIRATION_MARGIN = 50;
 
   for (let d = 1; d <= Math.max(1, ai.depth); d++) {
-    let alpha = prevScore - ASPIRATION_MARGIN;
-    let beta = prevScore + ASPIRATION_MARGIN;
+    const alpha = prevScore - ASPIRATION_MARGIN;
+    const beta = prevScore + ASPIRATION_MARGIN;
     let [score, move] = minimax(ai, game, d, d, alpha, beta, true);
 
     if (score <= alpha || score >= beta) {
@@ -114,7 +114,7 @@ function minimax(
   }
 
   // Move ordering
-  let moves = availableMoves(game);
+  const moves = availableMoves(game);
   const current = game.currentPlayer;
   const opponent: Player = current === 'X' ? 'O' : 'X';
 
