@@ -60,7 +60,7 @@ const MODE_LABELS: Record<GameMode, string> = {
 };
 
 const toGameState = (engine: HyperXOGame, lastMove?: MoveEntry) =>
-  toGameState(engine, 'local', lastMove);
+  engineToGameState(engine, 'local', lastMove);
 
 export default function GameView({ difficulty, playerSymbol, aiName, mode, draft, playerBan, aiBan, onBack }: Props) {
   const [game, setGame] = useState<GameState | null>(null);
