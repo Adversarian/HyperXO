@@ -30,6 +30,14 @@ a client-side minimax AI, and peer-to-peer multiplayer via an embedded WebSocket
   restrictions. Browser clients use native WebSocket.
 - Player colors: X = cyan, O = rose. Won boards use opaque overlays.
 
+## Game modes
+
+- **Classic** — standard Ultimate Tic-Tac-Toe rules (3 boards in a row wins).
+- **Sudden Death** — first player to win any single board wins the game.
+- **Misère** — completing 3 boards in a row means that player *loses*.
+- **Gambits** (in progress) — draft-based tactical cards with active abilities and passive doctrines.
+  See `GAMBITS.md` for the full design document.
+
 ## Tooling & testing
 
 - Frontend dependencies: `cd frontend && npm install`
