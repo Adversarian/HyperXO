@@ -53,10 +53,11 @@ export interface SmallBoard {
   cells: Cell[];
   winner: Player | null;
   drawn: boolean;
+  condemned: boolean;
 }
 
 export function createSmallBoard(): SmallBoard {
-  return { cells: Array(9).fill(''), winner: null, drawn: false };
+  return { cells: Array(9).fill(''), winner: null, drawn: false, condemned: false };
 }
 
 // ---------- Game state ----------
@@ -94,13 +95,13 @@ export function bigBoardState(game: HyperXOGame): string[] {
   return game.boards.map(b =>
     b.winner === 'X' ? 'X'
     : b.winner === 'O' ? 'O'
-    : b.drawn ? 'G'
+    : (b.drawn || b.condemned) ? 'G'
     : '.'
   );
 }
 
 function isLive(b: SmallBoard): boolean {
-  return !b.winner && !b.drawn && b.cells.some(c => c === '');
+  return !b.winner && !b.drawn && !b.condemned && b.cells.some(c => c === '');
 }
 
 export function availableMoves(game: HyperXOGame): [number, number][] {
@@ -150,7 +151,23 @@ export function captureUndo(game: HyperXOGame, big: number): UndoState {
 
 // ---------- Mutations ----------
 
-function updateGlobalState(game: HyperXOGame): void {
+export function recalcBoard(board: SmallBoard): void {
+  if (board.condemned) return;
+  board.winner = null;
+  board.drawn = false;
+  for (const [a, b, c] of WINNING_LINES) {
+    const v = board.cells[a];
+    if (v !== '' && v === board.cells[b] && v === board.cells[c]) {
+      board.winner = v as Player;
+      break;
+    }
+  }
+  if (!board.winner && board.cells.every(c => c !== '')) {
+    board.drawn = true;
+  }
+}
+
+export function updateGlobalState(game: HyperXOGame): void {
   if (game.mode === 'sudden-death') {
     for (const b of game.boards) {
       if (b.winner) {
@@ -218,7 +235,7 @@ export function applyMove(game: HyperXOGame, big: number, cell: number): void {
 
   // Compute next forced board
   const tb = game.boards[cell];
-  game.nextBoardIndex = (tb.winner || tb.drawn || tb.cells.every(c => c !== '')) ? null : cell;
+  game.nextBoardIndex = (tb.winner || tb.drawn || tb.condemned || tb.cells.every(c => c !== '')) ? null : cell;
 
   // Add new forced-board component
   game.zkey ^= zobrist.nbiKey(game.nextBoardIndex);

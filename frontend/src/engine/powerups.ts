@@ -1,0 +1,435 @@
+import {
+  type HyperXOGame,
+  type Player,
+  WINNING_LINES,
+  recalcBoard,
+  updateGlobalState,
+} from './game';
+
+// ---- Card types ----
+
+export type PowerUpCategory = 'strike' | 'tactics' | 'disruption' | 'doctrine';
+
+export type StrikeCard = 'double-down' | 'haste' | 'overwrite';
+export type TacticsCard = 'redirect' | 'recall' | 'condemn';
+export type DisruptionCard = 'swap' | 'shatter' | 'sabotage';
+export type DoctrineCard = 'momentum' | 'siege' | 'flanking';
+
+export type ActiveCard = StrikeCard | TacticsCard | DisruptionCard;
+export type PowerUpCard = ActiveCard | DoctrineCard;
+
+// ---- Card definitions ----
+
+export interface CardDef {
+  id: PowerUpCard;
+  name: string;
+  category: PowerUpCategory;
+  description: string;
+  flavor: string;
+  passive: boolean;
+  targetType: 'none' | 'board' | 'opponent-cell';
+}
+
+export const CARD_CATALOG: Record<PowerUpCard, CardDef> = {
+  // Strike
+  'double-down': {
+    id: 'double-down',
+    name: 'Double Down',
+    category: 'strike',
+    description: 'Place two pieces on the same board this turn.',
+    flavor: 'Finisher',
+    passive: false,
+    targetType: 'none',
+  },
+  'haste': {
+    id: 'haste',
+    name: 'Haste',
+    category: 'strike',
+    description: 'Take two consecutive turns.',
+    flavor: 'Tempo',
+    passive: false,
+    targetType: 'none',
+  },
+  'overwrite': {
+    id: 'overwrite',
+    name: 'Overwrite',
+    category: 'strike',
+    description: 'Replace one opponent piece on a live board with yours.',
+    flavor: 'Surgical',
+    passive: false,
+    targetType: 'opponent-cell',
+  },
+  // Tactics
+  'redirect': {
+    id: 'redirect',
+    name: 'Redirect',
+    category: 'tactics',
+    description: 'Choose which board your opponent is sent to.',
+    flavor: 'Control',
+    passive: false,
+    targetType: 'board',
+  },
+  'recall': {
+    id: 'recall',
+    name: 'Recall',
+    category: 'tactics',
+    description: 'Relocate one of your pieces to a different board.',
+    flavor: 'Reposition',
+    passive: false,
+    targetType: 'none',
+  },
+  'condemn': {
+    id: 'condemn',
+    name: 'Condemn',
+    category: 'tactics',
+    description: 'Permanently remove a board from play.',
+    flavor: 'Strategic',
+    passive: false,
+    targetType: 'board',
+  },
+  // Disruption
+  'swap': {
+    id: 'swap',
+    name: 'Swap',
+    category: 'disruption',
+    description: 'Exchange all X and O pieces on a live board.',
+    flavor: 'Chaos',
+    passive: false,
+    targetType: 'board',
+  },
+  'shatter': {
+    id: 'shatter',
+    name: 'Shatter',
+    category: 'disruption',
+    description: 'Wipe all pieces from a board, revoke win.',
+    flavor: 'Nuclear',
+    passive: false,
+    targetType: 'board',
+  },
+  'sabotage': {
+    id: 'sabotage',
+    name: 'Sabotage',
+    category: 'disruption',
+    description: 'Remove one opponent piece from any board.',
+    flavor: 'Precise',
+    passive: false,
+    targetType: 'opponent-cell',
+  },
+  // Doctrine
+  'momentum': {
+    id: 'momentum',
+    name: 'Momentum',
+    category: 'doctrine',
+    description: 'When you win a board, take an extra turn.',
+    flavor: 'Snowball',
+    passive: true,
+    targetType: 'none',
+  },
+  'siege': {
+    id: 'siege',
+    name: 'Siege',
+    category: 'doctrine',
+    description: '2-in-a-row unchallenged for 3 turns auto-claims the cell.',
+    flavor: 'Pressure',
+    passive: true,
+    targetType: 'none',
+  },
+  'flanking': {
+    id: 'flanking',
+    name: 'Flanking',
+    category: 'doctrine',
+    description: 'When any board is won, place a bonus piece anywhere.',
+    flavor: 'Cascade',
+    passive: true,
+    targetType: 'none',
+  },
+};
+
+// ---- Category card lists ----
+
+export const STRIKE_CARDS: StrikeCard[] = ['double-down', 'haste', 'overwrite'];
+export const TACTICS_CARDS: TacticsCard[] = ['redirect', 'recall', 'condemn'];
+export const DISRUPTION_CARDS: DisruptionCard[] = ['swap', 'shatter', 'sabotage'];
+export const DOCTRINE_CARDS: DoctrineCard[] = ['momentum', 'siege', 'flanking'];
+
+export const CATEGORIES: { key: PowerUpCategory; label: string; cards: PowerUpCard[] }[] = [
+  { key: 'strike', label: 'Strike', cards: STRIKE_CARDS },
+  { key: 'tactics', label: 'Tactics', cards: TACTICS_CARDS },
+  { key: 'disruption', label: 'Disruption', cards: DISRUPTION_CARDS },
+  { key: 'doctrine', label: 'Doctrine', cards: DOCTRINE_CARDS },
+];
+
+// ---- Draft ----
+
+export interface PowerUpDraft {
+  strike: StrikeCard;
+  tactics: TacticsCard;
+  disruption: DisruptionCard;
+  doctrine: DoctrineCard;
+}
+
+export function createDefaultDraft(): PowerUpDraft {
+  return {
+    strike: 'double-down',
+    tactics: 'recall',
+    disruption: 'swap',
+    doctrine: 'momentum',
+  };
+}
+
+export function isDraftComplete(partial: Partial<PowerUpDraft>): partial is PowerUpDraft {
+  return !!(partial.strike && partial.tactics && partial.disruption && partial.doctrine);
+}
+
+// ---- In-game state ----
+
+export interface PowerUpState {
+  draft: PowerUpDraft;
+  used: Record<string, boolean>;
+}
+
+export function createPowerUpState(draft: PowerUpDraft): PowerUpState {
+  return { draft, used: {} };
+}
+
+export function getActiveCards(draft: PowerUpDraft): ActiveCard[] {
+  return [draft.strike, draft.tactics, draft.disruption];
+}
+
+export function isCardUsed(state: PowerUpState, card: ActiveCard): boolean {
+  return !!state.used[card];
+}
+
+export function useCard(state: PowerUpState, card: ActiveCard): void {
+  state.used[card] = true;
+}
+
+export function getAvailableCards(state: PowerUpState): ActiveCard[] {
+  return getActiveCards(state.draft).filter(c => !isCardUsed(state, c));
+}
+
+// ---- Two-player context ----
+
+export interface PowerUpGameContext {
+  X: PowerUpState;
+  O: PowerUpState;
+}
+
+export function createPowerUpGameContext(xDraft: PowerUpDraft, oDraft: PowerUpDraft): PowerUpGameContext {
+  return {
+    X: createPowerUpState(xDraft),
+    O: createPowerUpState(oDraft),
+  };
+}
+
+// ---- Active card effects ----
+
+// Recall: move one of your own pieces from a live board to an empty cell on another live board
+export function applyRecall(
+  game: HyperXOGame,
+  fromBoard: number, fromCell: number,
+  toBoard: number, toCell: number,
+): void {
+  const player = game.currentPlayer;
+  const src = game.boards[fromBoard];
+  const dst = game.boards[toBoard];
+
+  if (src.condemned || src.winner || src.drawn) throw new Error('Source must be live');
+  if (src.cells[fromCell] !== player) throw new Error('Can only recall own piece');
+  if (fromBoard === toBoard) throw new Error('Must move to different board');
+  if (dst.condemned || dst.winner || dst.drawn) throw new Error('Destination must be live');
+  if (dst.cells[toCell] !== '') throw new Error('Destination must be empty');
+
+  // Remove from source
+  game.zkey ^= game.zobrist.pieceKey(fromBoard, fromCell, player);
+  src.cells[fromCell] = '';
+  recalcBoard(src);
+  updateGlobalState(game);
+
+  // Place at destination
+  dst.cells[toCell] = player;
+  game.zkey ^= game.zobrist.pieceKey(toBoard, toCell, player);
+  recalcBoard(dst);
+  updateGlobalState(game);
+}
+
+// Sabotage: remove one opponent piece
+export function applySabotage(game: HyperXOGame, boardIdx: number, cellIdx: number): void {
+  const board = game.boards[boardIdx];
+  const opponent: Player = game.currentPlayer === 'X' ? 'O' : 'X';
+  if (board.condemned) throw new Error('Cannot target condemned board');
+  if (board.cells[cellIdx] !== opponent) throw new Error('Can only sabotage opponent piece');
+
+  game.zkey ^= game.zobrist.pieceKey(boardIdx, cellIdx, opponent);
+  board.cells[cellIdx] = '';
+
+  recalcBoard(board);
+  updateGlobalState(game);
+}
+
+// Overwrite: replace one opponent piece with yours
+export function applyOverwrite(game: HyperXOGame, boardIdx: number, cellIdx: number): void {
+  const board = game.boards[boardIdx];
+  const player = game.currentPlayer;
+  const opponent: Player = player === 'X' ? 'O' : 'X';
+  if (board.condemned || board.winner || board.drawn) throw new Error('Cannot target resolved board');
+  if (board.cells[cellIdx] !== opponent) throw new Error('Can only overwrite opponent piece');
+
+  game.zkey ^= game.zobrist.pieceKey(boardIdx, cellIdx, opponent);
+  board.cells[cellIdx] = player;
+  game.zkey ^= game.zobrist.pieceKey(boardIdx, cellIdx, player);
+
+  recalcBoard(board);
+  updateGlobalState(game);
+}
+
+// Swap: exchange all X↔O on a board
+export function applySwap(game: HyperXOGame, boardIdx: number): void {
+  const board = game.boards[boardIdx];
+  if (board.condemned || board.winner || board.drawn) throw new Error('Can only swap live board');
+
+  for (let i = 0; i < 9; i++) {
+    const cell = board.cells[i];
+    if (cell === 'X') {
+      game.zkey ^= game.zobrist.pieceKey(boardIdx, i, 'X');
+      board.cells[i] = 'O';
+      game.zkey ^= game.zobrist.pieceKey(boardIdx, i, 'O');
+    } else if (cell === 'O') {
+      game.zkey ^= game.zobrist.pieceKey(boardIdx, i, 'O');
+      board.cells[i] = 'X';
+      game.zkey ^= game.zobrist.pieceKey(boardIdx, i, 'X');
+    }
+  }
+
+  recalcBoard(board);
+  updateGlobalState(game);
+}
+
+// Shatter: wipe all pieces from a board, revoke win
+export function applyShatter(game: HyperXOGame, boardIdx: number): void {
+  const board = game.boards[boardIdx];
+  if (board.condemned) throw new Error('Cannot shatter condemned board');
+
+  for (let i = 0; i < 9; i++) {
+    const cell = board.cells[i];
+    if (cell === 'X' || cell === 'O') {
+      game.zkey ^= game.zobrist.pieceKey(boardIdx, i, cell);
+      board.cells[i] = '';
+    }
+  }
+
+  board.winner = null;
+  board.drawn = false;
+  updateGlobalState(game);
+}
+
+// Condemn: permanently remove a board from play
+export function applyCondemn(game: HyperXOGame, boardIdx: number): void {
+  const board = game.boards[boardIdx];
+  if (board.winner || board.drawn || board.condemned) throw new Error('Can only condemn live board');
+
+  for (let i = 0; i < 9; i++) {
+    const cell = board.cells[i];
+    if (cell === 'X' || cell === 'O') {
+      game.zkey ^= game.zobrist.pieceKey(boardIdx, i, cell);
+      board.cells[i] = '';
+    }
+  }
+
+  board.condemned = true;
+  board.winner = null;
+  board.drawn = false;
+  updateGlobalState(game);
+
+  // If directed to the now-condemned board, grant free move
+  if (game.nextBoardIndex === boardIdx) {
+    game.zkey ^= game.zobrist.nbiKey(game.nextBoardIndex);
+    game.nextBoardIndex = null;
+    game.zkey ^= game.zobrist.nbiKey(null);
+  }
+}
+
+// Redirect: override opponent's next board (applied AFTER placement)
+export function applyRedirect(game: HyperXOGame, targetBoard: number): void {
+  const board = game.boards[targetBoard];
+  if (board.winner || board.drawn || board.condemned) throw new Error('Redirect target must be live');
+
+  game.zkey ^= game.zobrist.nbiKey(game.nextBoardIndex);
+  game.nextBoardIndex = targetBoard;
+  game.zkey ^= game.zobrist.nbiKey(game.nextBoardIndex);
+}
+
+// ---- Siege passive helpers ----
+
+export interface SiegeThreat {
+  boardIdx: number;
+  blockingCell: number;
+  turnsUnblocked: number;
+}
+
+/** Scan all current 2-in-a-row threats for a player. */
+export function scanSiegeThreats(game: HyperXOGame, player: Player): Omit<SiegeThreat, 'turnsUnblocked'>[] {
+  const threats: Omit<SiegeThreat, 'turnsUnblocked'>[] = [];
+  for (let bi = 0; bi < 9; bi++) {
+    const board = game.boards[bi];
+    if (board.winner || board.drawn || board.condemned) continue;
+    for (const [a, b, c] of WINNING_LINES) {
+      const trio = [board.cells[a], board.cells[b], board.cells[c]];
+      const playerCount = trio.filter(t => t === player).length;
+      const emptyIdx = trio.indexOf('');
+      if (playerCount === 2 && emptyIdx !== -1) {
+        const blockingCell = [a, b, c][emptyIdx];
+        // Avoid duplicate threats for the same blocking cell
+        if (!threats.some(t => t.boardIdx === bi && t.blockingCell === blockingCell)) {
+          threats.push({ boardIdx: bi, blockingCell });
+        }
+      }
+    }
+  }
+  return threats;
+}
+
+/** Refresh threat list after Siege player's move (detect new threats, keep counters). */
+export function refreshSiegeThreats(
+  existing: SiegeThreat[],
+  game: HyperXOGame,
+  player: Player,
+): SiegeThreat[] {
+  const current = scanSiegeThreats(game, player);
+  return current.map(ct => {
+    const prev = existing.find(t => t.boardIdx === ct.boardIdx && t.blockingCell === ct.blockingCell);
+    return { ...ct, turnsUnblocked: prev?.turnsUnblocked ?? 0 };
+  });
+}
+
+/** Advance counters after opponent's move. Returns updated threats and any auto-claimed cells. */
+export function advanceSiegeThreats(
+  existing: SiegeThreat[],
+  game: HyperXOGame,
+  player: Player,
+): { updated: SiegeThreat[]; claimed: { boardIdx: number; cellIdx: number }[] } {
+  const current = scanSiegeThreats(game, player);
+  const claimed: { boardIdx: number; cellIdx: number }[] = [];
+  const updated: SiegeThreat[] = [];
+
+  for (const ct of current) {
+    const prev = existing.find(t => t.boardIdx === ct.boardIdx && t.blockingCell === ct.blockingCell);
+    const turnsUnblocked = prev ? prev.turnsUnblocked + 1 : 0;
+    if (turnsUnblocked >= 3) {
+      claimed.push({ boardIdx: ct.boardIdx, cellIdx: ct.blockingCell });
+    } else {
+      updated.push({ ...ct, turnsUnblocked });
+    }
+  }
+
+  return { updated, claimed };
+}
+
+/** Place a Siege-claimed piece on the board. */
+export function applySiegeClaim(game: HyperXOGame, boardIdx: number, cellIdx: number, player: Player): void {
+  const board = game.boards[boardIdx];
+  board.cells[cellIdx] = player;
+  game.zkey ^= game.zobrist.pieceKey(boardIdx, cellIdx, player);
+  recalcBoard(board);
+  updateGlobalState(game);
+}

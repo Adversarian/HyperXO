@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import type { PowerUpDraft } from '../engine/powerups';
 import { QRCodeSVG } from 'qrcode.react';
 import { createRoom, connectRoom } from '../api';
 
@@ -6,7 +7,7 @@ interface Props {
   mode: 'create' | 'join';
   initialRoomId?: string;
   onBack: () => void;
-  onGameStart: (ws: WebSocket, role: 'host' | 'guest', myName: string, peerName: string, mySymbol: 'X' | 'O') => void;
+  onGameStart: (ws: WebSocket, role: 'host' | 'guest', myName: string, peerName: string, mySymbol: 'X' | 'O', gambits: boolean) => void;
 }
 
 export default function Lobby({ mode, initialRoomId, onBack, onGameStart }: Props) {
@@ -17,6 +18,9 @@ export default function Lobby({ mode, initialRoomId, onBack, onGameStart }: Prop
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [gambits, setGambits] = useState(false);
+  const gambitsRef = useRef(false);
+  gambitsRef.current = gambits;
   const wsRef = useRef<WebSocket | null>(null);
   const roleRef = useRef<'host' | 'guest' | null>(null);
   const nameRef = useRef('');
@@ -43,17 +47,17 @@ export default function Lobby({ mode, initialRoomId, onBack, onGameStart }: Prop
             // Host randomly assigns symbols and tells the guest
             const hostSymbol = Math.random() < 0.5 ? 'X' : 'O';
             const guestSymbol = hostSymbol === 'X' ? 'O' : 'X';
-            ws.send(JSON.stringify({ type: 'assign', hostSymbol, guestSymbol, hostName: nameRef.current }));
+            ws.send(JSON.stringify({ type: 'assign', hostSymbol, guestSymbol, hostName: nameRef.current, gambits: gambitsRef.current }));
             handedOff.current = true;
             ws.onmessage = null;
-            onGameStart(ws, 'host', nameRef.current, peerName, hostSymbol as 'X' | 'O');
+            onGameStart(ws, 'host', nameRef.current, peerName, hostSymbol as 'X' | 'O', gambitsRef.current);
           }
           // Guest waits for the 'assign' message instead
         } else if (msg.type === 'assign') {
           // Guest receives symbol assignment from host
           handedOff.current = true;
           ws.onmessage = null;
-          onGameStart(ws, 'guest', nameRef.current, msg.hostName, msg.guestSymbol as 'X' | 'O');
+          onGameStart(ws, 'guest', nameRef.current, msg.hostName, msg.guestSymbol as 'X' | 'O', msg.gambits ?? false);
         } else if (msg.type === 'peer-status' && msg.status === 'joined') {
           ws.send(JSON.stringify({ type: 'name', name: nameRef.current }));
           setStatus('Opponent joined...');
@@ -275,6 +279,22 @@ export default function Lobby({ mode, initialRoomId, onBack, onGameStart }: Prop
           >
             {copied ? 'Copied!' : 'Copy invite link'}
           </button>
+
+          <div className="flex items-center justify-center gap-3 mt-2">
+            <span className="text-zinc-400 text-sm">Gambits:</span>
+            <button
+              onClick={() => setGambits(false)}
+              className={`px-3 py-1 rounded-lg text-sm font-bold transition-all ${
+                !gambits ? 'bg-zinc-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+              }`}
+            >Off</button>
+            <button
+              onClick={() => setGambits(true)}
+              className={`px-3 py-1 rounded-lg text-sm font-bold transition-all ${
+                gambits ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/25' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+              }`}
+            >On</button>
+          </div>
         </div>
       )}
 

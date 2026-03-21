@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef } from 'react';
 import type { Difficulty, Screen, GameMode } from './types';
+import type { PowerUpDraft } from './engine/powerups';
 import Menu from './components/Menu';
+import DraftScreen from './components/DraftScreen';
 import GameView from './components/GameView';
 import Lobby from './components/Lobby';
 import FriendGame from './components/FriendGame';
@@ -13,11 +15,12 @@ export default function App() {
   const [playerSymbol, setPlayerSymbol] = useState<'X' | 'O'>('X');
   const [aiName, setAiName] = useState('Novax');
   const [gameMode, setGameMode] = useState<GameMode>('classic');
+  const [playerDraft, setPlayerDraft] = useState<PowerUpDraft | null>(null);
   const [friendWs, setFriendWs] = useState<WebSocket | null>(null);
-  const [friendRole, setFriendRole] = useState<'host' | 'guest'>('host');
   const [myName, setMyName] = useState('');
   const [opponentName, setOpponentName] = useState('');
   const [friendSymbol, setFriendSymbol] = useState<'X' | 'O'>('X');
+  const [friendGambits, setFriendGambits] = useState(false);
   const [fade, setFade] = useState(true);
   const transitioning = useRef(false);
 
@@ -41,12 +44,23 @@ export default function App() {
   );
 
   const handleStartAI = useCallback(
-    (d: Difficulty, sym: 'X' | 'O', name: string, mode: GameMode) => {
+    (d: Difficulty, sym: 'X' | 'O', name: string, mode: GameMode, powerUps: boolean) => {
       transitionTo(() => {
         setDifficulty(d);
         setPlayerSymbol(sym);
         setAiName(name);
         setGameMode(mode);
+        setPlayerDraft(null);
+        setScreen(powerUps ? 'draft' : 'game');
+      });
+    },
+    [transitionTo]
+  );
+
+  const handleDraftReady = useCallback(
+    (draft: PowerUpDraft) => {
+      transitionTo(() => {
+        setPlayerDraft(draft);
         setScreen('game');
       });
     },
@@ -62,14 +76,14 @@ export default function App() {
   }, [transitionTo]);
 
   const handleGameStart = useCallback(
-    (ws: WebSocket, role: 'host' | 'guest', playerName: string, peerName: string, mySymbol: 'X' | 'O') => {
+    (ws: WebSocket, _role: 'host' | 'guest', playerName: string, peerName: string, mySymbol: 'X' | 'O', gambits: boolean) => {
       transitionTo(() => {
         setFriendWs(ws);
-        setFriendRole(role);
         setMyName(playerName);
         setOpponentName(peerName);
         setFriendSymbol(mySymbol);
-        setScreen('lobby-join');
+        setFriendGambits(gambits);
+        setScreen('friend-game');
       });
     },
     [transitionTo]
@@ -116,8 +130,12 @@ export default function App() {
           />
         )}
 
+        {screen === 'draft' && (
+          <DraftScreen onReady={handleDraftReady} onBack={goMenu} />
+        )}
+
         {screen === 'game' && (
-          <GameView difficulty={difficulty} playerSymbol={playerSymbol} aiName={aiName} mode={gameMode} onBack={goMenu} />
+          <GameView difficulty={difficulty} playerSymbol={playerSymbol} aiName={aiName} mode={gameMode} draft={playerDraft} onBack={goMenu} />
         )}
 
         {screen === 'lobby-create' && !friendWs && (
@@ -128,13 +146,13 @@ export default function App() {
           <Lobby mode="join" onBack={goMenu} onGameStart={handleGameStart} />
         )}
 
-        {friendWs && (
+        {screen === 'friend-game' && friendWs && (
           <FriendGame
             ws={friendWs}
-            role={friendRole}
             myName={myName}
             opponentName={opponentName}
             mySymbol={friendSymbol}
+            gambits={friendGambits}
             onBack={goMenu}
           />
         )}

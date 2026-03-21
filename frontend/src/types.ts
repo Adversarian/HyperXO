@@ -3,6 +3,7 @@ export interface BoardState {
   cells: string[];
   winner: string | null;
   drawn: boolean;
+  condemned?: boolean;
 }
 
 export interface MoveEntry {
@@ -29,4 +30,4 @@ export type Difficulty = 3 | 5 | 8;
 
 export type GameMode = 'classic' | 'sudden-death' | 'misere';
 
-export type Screen = 'menu' | 'game' | 'lobby-create' | 'lobby-join';
+export type Screen = 'menu' | 'draft' | 'game' | 'lobby-create' | 'lobby-join' | 'friend-game';

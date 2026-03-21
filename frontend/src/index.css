@@ -22,3 +22,21 @@
   animation: logo-glow 10s ease-in-out infinite;
   text-shadow: 0 0 1px rgba(255, 255, 255, 0.05);
 }
+
+@keyframes gambit-flash {
+  0% { opacity: 0.7; transform: scale(1.02); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+.animate-gambit-flash {
+  animation: gambit-flash 600ms ease-out forwards;
+}
+
+@keyframes siege-pulse {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.5; }
+}
+
+.animate-siege-pulse {
+  animation: siege-pulse 1.5s ease-in-out infinite;
+}

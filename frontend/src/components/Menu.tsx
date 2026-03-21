@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Difficulty, GameMode } from '../types';
 
 interface Props {
-  onStartAI: (difficulty: Difficulty, symbol: 'X' | 'O', aiName: string, mode: GameMode) => void;
+  onStartAI: (difficulty: Difficulty, symbol: 'X' | 'O', aiName: string, mode: GameMode, powerUps: boolean) => void;
   onHostGame: () => void;
   onJoinGame: () => void;
 }
@@ -23,6 +23,7 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
   const [mode, setMode] = useState<GameMode>('classic');
   const [difficulty, setDifficulty] = useState<Difficulty>(3);
   const [symbol, setSymbol] = useState<'X' | 'O'>('X');
+  const [powerUps, setPowerUps] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [rulesVisible, setRulesVisible] = useState(false);
 
@@ -125,11 +126,35 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
           </button>
         </div>
 
+        <div className="flex items-center justify-center gap-3">
+          <span className="text-zinc-400 text-sm">Gambits:</span>
+          <button
+            onClick={() => setPowerUps(false)}
+            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
+              !powerUps
+                ? 'bg-zinc-600 text-white'
+                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+            }`}
+          >
+            Off
+          </button>
+          <button
+            onClick={() => setPowerUps(true)}
+            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
+              powerUps
+                ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/25'
+                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+            }`}
+          >
+            On
+          </button>
+        </div>
+
         <button
-          onClick={() => onStartAI(difficulty, symbol, DIFFICULTIES.find(d => d.value === difficulty)!.name, mode)}
+          onClick={() => onStartAI(difficulty, symbol, DIFFICULTIES.find(d => d.value === difficulty)!.name, mode, powerUps)}
           className="w-full rounded-xl bg-indigo-500 px-6 py-3 text-white font-semibold hover:bg-indigo-400 transition-colors shadow-lg shadow-indigo-500/25 active:scale-[0.98]"
         >
-          Start Game
+          {powerUps ? 'Draft Gambits' : 'Start Game'}
         </button>
       </div>
 
@@ -207,6 +232,23 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
             <p className="mt-4 text-xs text-zinc-600">
               Tip: every move is a tradeoff between strengthening your position and controlling where your opponent plays next.
             </p>
+
+            <div className="mt-5 pt-4 border-t border-zinc-800">
+              <h3 className="text-zinc-200 text-sm font-semibold mb-2">Gambits</h3>
+              <p className="text-sm text-zinc-400 mb-2">
+                Enable <span className="text-zinc-300">Gambits</span> to draft tactical cards before the game.
+                Pick one from each of four categories:
+              </p>
+              <ul className="space-y-1 text-xs text-zinc-400 ml-3">
+                <li><span className="text-rose-400 font-medium">Strike</span> — power up your turn (place extra pieces, steal cells, double turns)</li>
+                <li><span className="text-sky-400 font-medium">Tactics</span> — control the flow (redirect opponent, play anywhere, remove a board)</li>
+                <li><span className="text-violet-400 font-medium">Disruption</span> — alter the board (swap pieces, wipe a board, remove a piece)</li>
+                <li><span className="text-amber-400 font-medium">Doctrine</span> — passive ability active all game (bonus turns on wins, auto-claim threats, bonus pieces)</li>
+              </ul>
+              <p className="text-xs text-zinc-500 mt-2">
+                Active gambits are one-time use. Activate before placing your piece.
+              </p>
+            </div>
           </div>
         </div>
       )}
