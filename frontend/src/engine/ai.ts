@@ -22,15 +22,24 @@ interface TTEntry {
   bestMove: [number, number] | null;
 }
 
+/** Card context for card-aware evaluation. */
+export interface CardContext {
+  /** AI's remaining unused active cards */
+  myCards: string[];
+  /** Opponent's remaining unused active cards */
+  opponentCards: string[];
+}
+
 export interface MinimaxAI {
   player: Player;
   depth: number;
   blunderRate: number;
   tt: Map<number, TTEntry>;
+  cardCtx: CardContext | null;
 }
 
 export function createAI(player: Player, depth: number, blunderRate = 0): MinimaxAI {
-  return { player, depth, blunderRate, tt: new Map() };
+  return { player, depth, blunderRate, tt: new Map(), cardCtx: null };
 }
 
 // Difficulty presets: [depth, blunderRate]
@@ -206,6 +215,15 @@ function moveHeuristic(game: HyperXOGame, move: [number, number], current: Playe
   return score;
 }
 
+/** Evaluate a position from a given player's perspective (no search, just heuristic). */
+export function evaluateForPlayer(game: HyperXOGame, player: Player, cardCtx?: CardContext | null): number {
+  if (game.winner === player) return 10000;
+  if (game.winner !== null) return -10000;
+  if (game.drawn) return 0;
+  const tempAi: MinimaxAI = { player, depth: 0, blunderRate: 0, tt: new Map(), cardCtx: cardCtx ?? null };
+  return evaluate(tempAi, game);
+}
+
 function evaluateTerminal(ai: MinimaxAI, game: HyperXOGame, remainingDepth: number): number {
   if (game.winner === ai.player) return 10000 + remainingDepth;
   if (game.winner !== null) return -10000 - remainingDepth;
@@ -223,6 +241,7 @@ function evaluate(ai: MinimaxAI, game: HyperXOGame): number {
 function evaluateClassic(ai: MinimaxAI, game: HyperXOGame): number {
   const me = ai.player;
   const opp: Player = me === 'X' ? 'O' : 'X';
+  const ctx = ai.cardCtx;
 
   let score = 0;
 
@@ -247,7 +266,8 @@ function evaluateClassic(ai: MinimaxAI, game: HyperXOGame): number {
   }
 
   // Micro-board detail
-  for (const board of game.boards) {
+  for (let bi = 0; bi < 9; bi++) {
+    const board = game.boards[bi];
     if (board.winner === me) { score += 40; continue; }
     if (board.winner === opp) { score -= 40; continue; }
     if (board.drawn) continue;
@@ -270,12 +290,160 @@ function evaluateClassic(ai: MinimaxAI, game: HyperXOGame): number {
     else if (board.cells[4] === opp) score -= 0.3;
   }
 
+  // ---- Card-aware adjustments ----
+  if (ctx) score += cardAdjustments(game, bb, me, opp, ctx);
+
   return score;
+}
+
+/**
+ * Adjust evaluation based on both players' remaining cards.
+ * Positive = favors `me`, negative = favors `opp`.
+ */
+function cardAdjustments(
+  game: HyperXOGame,
+  bb: string[],
+  me: Player,
+  opp: Player,
+  ctx: CardContext,
+): number {
+  const { myCards, opponentCards } = ctx;
+  let adj = 0;
+
+  // --- Opponent card threats ---
+
+  // Opponent has shatter → our won boards are fragile (could be revoked)
+  if (opponentCards.includes('shatter')) {
+    for (const board of game.boards) {
+      if (board.winner === me) adj -= 8;  // discount won boards (40 → effectively 32)
+      if (board.winner === opp) adj += 5; // their won boards are also fragile (we could shatter too)
+    }
+  }
+
+  // Opponent has overwrite → our single-piece blocks are unreliable
+  if (opponentCards.includes('overwrite')) {
+    for (const board of game.boards) {
+      if (board.winner || board.drawn || board.condemned) continue;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        const oppCount = trio.filter(t => t === opp).length;
+        const meCount = trio.filter(t => t === me).length;
+        // Opponent has 2-in-a-row blocked by our single piece → block is unreliable
+        if (oppCount === 2 && meCount === 1) adj -= 3;
+      }
+    }
+  }
+
+  // Opponent has sabotage → our won boards with thin wins are fragile
+  if (opponentCards.includes('sabotage')) {
+    for (const board of game.boards) {
+      if (board.winner !== me) continue;
+      // Count winning lines — if only one winning line, sabotage can break it
+      let winningLines = 0;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.every(t => t === me)) winningLines++;
+      }
+      if (winningLines === 1) adj -= 5; // single winning line = fragile
+    }
+  }
+
+  // Opponent has condemn → boards that are sole links in our macro lines are vulnerable
+  if (opponentCards.includes('condemn')) {
+    for (const [a, b, c] of WINNING_LINES) {
+      const marks = [bb[a], bb[b], bb[c]];
+      const myCount = marks.filter(m => m === me).length;
+      const openCount = marks.filter(m => m === '.').length;
+      // We have 2 on this macro line, 1 open → opponent could condemn the open one
+      if (myCount === 2 && openCount === 1) adj -= 4;
+    }
+  }
+
+  // Opponent has swap → boards where we dominate could be flipped
+  if (opponentCards.includes('swap')) {
+    for (const board of game.boards) {
+      if (board.winner || board.drawn || board.condemned) continue;
+      const myPieces = board.cells.filter(c => c === me).length;
+      const oppPieces = board.cells.filter(c => c === opp).length;
+      // We have significantly more pieces → vulnerable to swap
+      if (myPieces >= oppPieces + 2) adj -= 3;
+    }
+  }
+
+  // Opponent has haste → their 2-in-a-row threats are more dangerous
+  if (opponentCards.includes('haste')) {
+    for (const board of game.boards) {
+      if (board.winner || board.drawn || board.condemned) continue;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === opp).length === 2 && trio.filter(t => t === '').length === 1) {
+          adj -= 2; // each opponent threat is scarier with haste
+        }
+      }
+    }
+  }
+
+  // Opponent has redirect → our board direction control is less reliable
+  if (opponentCards.includes('redirect')) {
+    adj -= 2; // small flat penalty for reduced positional control
+  }
+
+  // --- Our card potential ---
+
+  // We have overwrite → opponent's single-piece blocks are less of a problem
+  if (myCards.includes('overwrite')) {
+    for (const board of game.boards) {
+      if (board.winner || board.drawn || board.condemned) continue;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        const meCount = trio.filter(t => t === me).length;
+        const oppCount = trio.filter(t => t === opp).length;
+        // We have 2-in-a-row blocked by single opponent piece → we can remove it
+        if (meCount === 2 && oppCount === 1) adj += 3;
+      }
+    }
+  }
+
+  // We have shatter → opponent's won boards are less permanent
+  if (myCards.includes('shatter')) {
+    for (const board of game.boards) {
+      if (board.winner === opp) adj += 5;
+    }
+  }
+
+  // We have sabotage → opponent's thin wins are vulnerable
+  if (myCards.includes('sabotage')) {
+    for (const board of game.boards) {
+      if (board.winner !== opp) continue;
+      let winningLines = 0;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.every(t => t === opp)) winningLines++;
+      }
+      if (winningLines === 1) adj += 4;
+    }
+  }
+
+  // We have haste → our threats are more potent
+  if (myCards.includes('haste')) {
+    for (const board of game.boards) {
+      if (board.winner || board.drawn || board.condemned) continue;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === me).length === 2 && trio.filter(t => t === '').length === 1) {
+          adj += 2;
+        }
+      }
+    }
+  }
+
+  return adj;
 }
 
 function evaluateSuddenDeath(ai: MinimaxAI, game: HyperXOGame): number {
   const me = ai.player;
   const opp: Player = me === 'X' ? 'O' : 'X';
+  const ctx = ai.cardCtx;
   let score = 0;
 
   // Only micro-board threats matter — any board win ends the game
@@ -300,12 +468,104 @@ function evaluateSuddenDeath(ai: MinimaxAI, game: HyperXOGame): number {
     else if (board.cells[4] === opp) score -= 0.5;
   }
 
+  if (ctx) score += cardAdjustmentsSuddenDeath(game, me, opp, ctx);
+
   return score;
+}
+
+/** Card adjustments for sudden death — any board win = game over. */
+function cardAdjustmentsSuddenDeath(
+  game: HyperXOGame,
+  me: Player,
+  opp: Player,
+  ctx: CardContext,
+): number {
+  const { myCards, opponentCards } = ctx;
+  let adj = 0;
+
+  // Opponent has haste → any opponent 2-in-a-row = near-certain death.
+  // In sudden death, haste + one threat = game-winning. Massive danger.
+  if (opponentCards.includes('haste')) {
+    for (const board of game.boards) {
+      if (board.winner || board.drawn || board.condemned) continue;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === opp).length === 2 && trio.filter(t => t === '').length === 1) {
+          adj -= 12; // each opponent threat is near-lethal with haste
+        }
+      }
+    }
+  }
+
+  // Opponent has overwrite → our blocked threats don't protect us
+  if (opponentCards.includes('overwrite')) {
+    for (const board of game.boards) {
+      if (board.winner || board.drawn || board.condemned) continue;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === opp).length === 2 && trio.filter(t => t === me).length === 1) {
+          adj -= 8; // our block is removable → threat is almost as bad as open
+        }
+      }
+    }
+  }
+
+  // Opponent has double-down → two pieces on one board is very dangerous
+  if (opponentCards.includes('double-down')) {
+    for (const board of game.boards) {
+      if (board.winner || board.drawn || board.condemned) continue;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === opp).length === 1 && trio.filter(t => t === '').length === 2) {
+          adj -= 3; // even 1-in-a-row with 2 empty = completable via DD
+        }
+      }
+    }
+  }
+
+  // Opponent has shatter/sabotage → if we've won a board (game should be over,
+  // but with passives the game might continue) these are less relevant in SD.
+  // Shatter is mainly defensive in SD (revoke our game-winning board).
+
+  // We have haste → our threats are near-guaranteed wins
+  if (myCards.includes('haste')) {
+    for (const board of game.boards) {
+      if (board.winner || board.drawn || board.condemned) continue;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === me).length === 2 && trio.filter(t => t === '').length === 1) {
+          adj += 10; // each of our threats is near-lethal with haste
+        }
+      }
+    }
+  }
+
+  // We have overwrite → blocked 2-in-a-rows are still completable = near-wins
+  if (myCards.includes('overwrite')) {
+    for (const board of game.boards) {
+      if (board.winner || board.drawn || board.condemned) continue;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === me).length === 2 && trio.filter(t => t === opp).length === 1) {
+          adj += 8; // we can remove blocker → near-guaranteed board win → game win
+        }
+      }
+    }
+  }
+
+  // We have shatter/sabotage → can revoke opponent's game-winning board
+  if (myCards.includes('shatter') || myCards.includes('sabotage')) {
+    // Provides a safety net — slightly less panic about opponent winning
+    adj += 5;
+  }
+
+  return adj;
 }
 
 function evaluateMisere(ai: MinimaxAI, game: HyperXOGame): number {
   const me = ai.player;
   const opp: Player = me === 'X' ? 'O' : 'X';
+  const ctx = ai.cardCtx;
   let score = 0;
 
   // Macro line potential: INVERTED (your lines = danger)
@@ -350,5 +610,104 @@ function evaluateMisere(ai: MinimaxAI, game: HyperXOGame): number {
     }
   }
 
+  if (ctx) score += cardAdjustmentsMisere(game, bb, me, opp, ctx);
+
   return score;
+}
+
+/** Card adjustments for misère — winning 3 macro boards in a row = you LOSE. */
+function cardAdjustmentsMisere(
+  game: HyperXOGame,
+  bb: string[],
+  me: Player,
+  opp: Player,
+  ctx: CardContext,
+): number {
+  const { myCards, opponentCards } = ctx;
+  let adj = 0;
+
+  // In misère, winning boards is DANGEROUS for you.
+  // Cards that cause you to win boards are liabilities.
+  // Cards that remove your own wins or force opponent to win are assets.
+
+  // Opponent has swap → they can flip a board THEY won to become OUR win.
+  // In misère, that's devastating — their loss becomes our loss.
+  if (opponentCards.includes('swap')) {
+    for (const board of game.boards) {
+      if (board.winner !== opp) continue;
+      // Each opponent-won board could be flipped onto us
+      // Check if it sits on one of our dangerous macro lines
+      const bi = game.boards.indexOf(board);
+      for (const [a, b, c] of WINNING_LINES) {
+        if (a !== bi && b !== bi && c !== bi) continue;
+        const marks = [bb[a], bb[b], bb[c]];
+        const myCount = marks.filter(m => m === me).length;
+        // If we already have boards on this line, a swap here could complete our losing line
+        if (myCount >= 1) adj -= 6;
+      }
+    }
+  }
+
+  // Opponent has condemn → they can remove a board from THEIR dangerous macro line
+  // This helps them avoid losing, which is bad for us
+  if (opponentCards.includes('condemn')) {
+    for (const [a, b, c] of WINNING_LINES) {
+      const marks = [bb[a], bb[b], bb[c]];
+      const oppCount = marks.filter(m => m === opp).length;
+      const openCount = marks.filter(m => m === '.').length;
+      // Opponent has 2 on a line → normally they're close to losing.
+      // But condemn lets them destroy the open board, escaping the trap.
+      if (oppCount === 2 && openCount === 1) adj -= 5;
+    }
+  }
+
+  // Opponent has shatter → they can revoke their own accidental board wins
+  if (opponentCards.includes('shatter')) {
+    for (const board of game.boards) {
+      if (board.winner === opp) adj -= 3; // their wins are less sticky (they can undo them)
+    }
+  }
+
+  // Opponent has haste/double-down → risky for THEM (might accidentally win boards)
+  // So these are actually less threatening in misère
+  if (opponentCards.includes('haste')) adj += 3;    // haste is a liability for opponent
+  if (opponentCards.includes('double-down')) adj += 2;
+
+  // Opponent has overwrite → they replace our piece with theirs.
+  // Could cause THEM to win a board (bad for them in misère) or prevent us from winning
+  // (prevents us contributing to our macro danger). Mixed value, slight concern.
+  if (opponentCards.includes('overwrite')) adj -= 2;
+
+  // --- Our card potential ---
+
+  // We have condemn → we can remove a board from our own dangerous macro line. Escape valve.
+  if (myCards.includes('condemn')) {
+    for (const [a, b, c] of WINNING_LINES) {
+      const marks = [bb[a], bb[b], bb[c]];
+      const myCount = marks.filter(m => m === me).length;
+      const openCount = marks.filter(m => m === '.').length;
+      if (myCount === 2 && openCount === 1) adj += 5; // we can escape this trap
+    }
+  }
+
+  // We have shatter → we can revoke our own accidental board wins
+  if (myCards.includes('shatter')) {
+    for (const board of game.boards) {
+      if (board.winner === me) adj += 4; // our wins are less permanently dangerous
+    }
+  }
+
+  // We have swap → we can flip opponent wins onto them or our wins off us
+  if (myCards.includes('swap')) {
+    for (const board of game.boards) {
+      // We won a board on a dangerous macro line → swap can flip it to opponent
+      if (board.winner === me) adj += 3;
+    }
+  }
+
+  // We have haste/double-down → risky for us in misère (might win unwanted boards)
+  if (myCards.includes('haste')) adj -= 2;
+  if (myCards.includes('double-down')) adj -= 1;
+
+  return adj;
 }

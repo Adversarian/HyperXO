@@ -8,7 +8,11 @@ a client-side minimax AI, and peer-to-peer multiplayer via an embedded WebSocket
 - `frontend/src/engine/game.ts` contains the authoritative game rules, board state, Zobrist hashing,
   and make/unmake move support. All game logic runs client-side in the browser/webview.
 - `frontend/src/engine/ai.ts` houses the minimax AI with alpha-beta pruning, iterative deepening,
-  transposition table, and move ordering. Depths 3, 5, and 8 are the supported difficulty levels.
+  transposition table, move ordering, and card-aware evaluation. Depths 3, 5, and 8 are the
+  supported difficulty levels.
+- `frontend/src/engine/powerups.ts` defines all gambit cards, draft system, and card effect functions.
+- `frontend/src/engine/ai-gambits.ts` contains the AI's card decision system: ban selection,
+  draft generation, simulation-based card evaluation, urgency multiplier, and deep verify.
 - `frontend/src/components/` contains the React UI: menu, game board, lobby, multiplayer views.
 - `frontend/src/api.ts` handles room creation and WebSocket connections, with automatic detection
   of Tauri vs browser mode. In Tauri, it uses Tauri commands and the WebSocket plugin; in the
@@ -35,7 +39,8 @@ a client-side minimax AI, and peer-to-peer multiplayer via an embedded WebSocket
 - **Classic** — standard Ultimate Tic-Tac-Toe rules (3 boards in a row wins).
 - **Sudden Death** — first player to win any single board wins the game.
 - **Misère** — completing 3 boards in a row means that player *loses*.
-- **Gambits** (in progress) — draft-based tactical cards with active abilities and passive doctrines.
+- **Gambits** — ban phase + draft-based tactical cards with active abilities and passive doctrines.
+  Full AI support with card-aware evaluation, urgency-based timing, and mode-specific adjustments.
   See `GAMBITS.md` for the full design document.
 
 ## Tooling & testing

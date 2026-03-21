@@ -65,15 +65,49 @@ Total possible loadouts: 3 x 3 x 3 x 3 = **81**.
 - **3 active uses in a 40-80 move game** means ~5% of turns have a power-up.
   Impactful moments without overwhelming the core game.
 
+## Ban Phase
+
+Before drafting, each player independently bans **1 card** (or skips). Bans
+are revealed simultaneously, then both players draft from the reduced pool.
+Banned cards are removed for both players; duplicate bans are allowed (both
+players waste a ban on the same card).
+
 ## AI support
 
-To be determined. Options in order of complexity:
+The AI uses a hybrid approach combining card-aware evaluation with heuristic
+card timing:
 
-1. **PvP only** — power-up mode disabled for AI games initially.
-2. **Heuristic AI** — AI evaluates power-up use outside the search tree
-   (check for game-winning or blocking plays, otherwise hold).
-3. **Full search integration** — power-up activations as moves in the minimax
-   tree. High branching factor increase; likely not worth the complexity.
+1. **Card-aware minimax evaluation** — the static evaluation function at every
+   leaf node of the search tree adjusts scores based on both players' remaining
+   cards. Opponent has shatter? Won boards are discounted. AI has overwrite?
+   Blocked threats are less of a problem. Mode-specific adjustments exist for
+   sudden death (haste is near-lethal) and misère (swap is devastating).
+
+2. **Simulation-based card valuation** — before each AI turn, every available
+   card is evaluated by simulating its effect and measuring position improvement
+   via `evaluateForPlayer`. Flow modifiers (double-down, haste, redirect) are
+   evaluated by simulating the actual move sequences they enable.
+
+3. **Urgency system** — raw card values are multiplied by a situational urgency
+   factor based on macro board threats, game progress, and card scarcity. This
+   makes the hard AI patient (holds cards for critical moments) while the easy
+   AI is impulsive (uses cards on small advantages).
+
+4. **Deep verify** — the top card candidate is verified with a reduced-depth
+   minimax search (depth−2, capped at 4) comparing "card + best follow-up" vs
+   "best move without card". Catches cases where the heuristic likes a card but
+   multi-ply consequences are bad.
+
+5. **Mode-aware banning** — the AI bans the most threatening card for the game
+   mode (haste in sudden death, swap in misère, haste in classic).
+
+### Difficulty scaling
+
+| Level | Ban | Card evaluation | Threshold | Behavior |
+|-------|-----|-----------------|-----------|----------|
+| Easy  | Random | 60% skip rate | 12 (low) | Impulsive — uses cards on small advantages |
+| Medium | Top 3 | Always evaluates | 25 | Moderate restraint |
+| Hard  | Best threat | Always evaluates | 45 (high) | Patient — saves cards for critical moments |
 
 ## Future expansion
 

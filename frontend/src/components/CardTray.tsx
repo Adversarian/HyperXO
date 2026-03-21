@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import {
   CARD_CATALOG,
+  CATEGORY_COLORS,
   getAvailableCards,
   isCardUsed,
   type PowerUpState,
   type ActiveCard,
-  type PowerUpCategory,
 } from '../engine/powerups';
 
 interface Props {
@@ -14,13 +14,6 @@ interface Props {
   activatingCard: ActiveCard | null;
   disabled: boolean;
 }
-
-const CATEGORY_COLORS: Record<PowerUpCategory, { bg: string; ring: string; text: string; used: string }> = {
-  strike: { bg: 'bg-rose-500/15', ring: 'ring-rose-500/60', text: 'text-rose-400', used: 'text-rose-800' },
-  tactics: { bg: 'bg-sky-500/15', ring: 'ring-sky-500/60', text: 'text-sky-400', used: 'text-sky-800' },
-  disruption: { bg: 'bg-violet-500/15', ring: 'ring-violet-500/60', text: 'text-violet-400', used: 'text-violet-800' },
-  doctrine: { bg: 'bg-amber-500/15', ring: 'ring-amber-500/60', text: 'text-amber-400', used: 'text-amber-800' },
-};
 
 export default function CardTray({ state, onActivate, activatingCard, disabled }: Props) {
   const [expandedCard, setExpandedCard] = useState<string | null>(null);

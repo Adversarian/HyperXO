@@ -159,6 +159,26 @@ export const CATEGORIES: { key: PowerUpCategory; label: string; cards: PowerUpCa
   { key: 'doctrine', label: 'Doctrine', cards: DOCTRINE_CARDS },
 ];
 
+// ---- UI constants ----
+
+export const CATEGORY_COLORS: Record<PowerUpCategory, {
+  bg: string; ring: string; text: string; used: string; active: string;
+}> = {
+  strike:     { bg: 'bg-rose-500/15',   ring: 'ring-rose-500/60',   text: 'text-rose-400',   used: 'text-rose-800',   active: 'bg-rose-500/20 ring-rose-500/60' },
+  tactics:    { bg: 'bg-sky-500/15',    ring: 'ring-sky-500/60',    text: 'text-sky-400',    used: 'text-sky-800',    active: 'bg-sky-500/20 ring-sky-500/60' },
+  disruption: { bg: 'bg-violet-500/15', ring: 'ring-violet-500/60', text: 'text-violet-400', used: 'text-violet-800', active: 'bg-violet-500/20 ring-violet-500/60' },
+  doctrine:   { bg: 'bg-amber-500/15',  ring: 'ring-amber-500/60',  text: 'text-amber-400',  used: 'text-amber-800',  active: 'bg-amber-500/20 ring-amber-500/60' },
+};
+
+export const CARD_FLASH_COLORS: Partial<Record<ActiveCard, string>> = {
+  overwrite: 'rose',
+  sabotage: 'violet',
+  recall: 'sky',
+  swap: 'violet',
+  shatter: 'rose',
+  condemn: 'zinc',
+};
+
 // ---- Draft ----
 
 export interface PowerUpDraft {

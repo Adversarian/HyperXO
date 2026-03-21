@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { Difficulty, GameMode, GameState } from '../types';
-import type { PowerUpDraft, PowerUpState, ActiveCard, SiegeThreat } from '../engine/powerups';
+import type { Difficulty, GameMode, GameState, TurnPhase, MoveEntry } from '../types';
+import type { PowerUpDraft, PowerUpState, ActiveCard, PowerUpCard, SiegeThreat } from '../engine/powerups';
 import {
   createPowerUpState,
   useCard,
+  getAvailableCards,
   CARD_CATALOG,
   applyRecall,
   applySabotage,
@@ -23,8 +24,20 @@ import {
   type HyperXOGame,
   type Player,
 } from '../engine/game';
+import { engineToGameState, isBoardLive, getNewlyWonBoards } from '../engine/utils';
 import { createAI, choose, DIFFICULTY_PRESETS } from '../engine/ai';
-import type { MinimaxAI } from '../engine/ai';
+import type { MinimaxAI, CardContext } from '../engine/ai';
+import {
+  aiBan as generateAiBan,
+  aiDraft as generateAiDraft,
+  aiDecideCard,
+  isPrePlacementCard,
+  applyAiPreCard,
+  getCardFlashBoards,
+  getCardFlashColor,
+  aiRedirectTarget,
+  type AiCardDecision,
+} from '../engine/ai-gambits';
 import BigBoard from './BigBoard';
 import GameStatus from './GameStatus';
 import CardTray from './CardTray';
@@ -35,6 +48,8 @@ interface Props {
   aiName: string;
   mode: GameMode;
   draft: PowerUpDraft | null;
+  playerBan?: PowerUpCard | null;
+  aiBan?: PowerUpCard | null;
   onBack: () => void;
 }
 
@@ -44,37 +59,10 @@ const MODE_LABELS: Record<GameMode, string> = {
   'misere': 'Misère',
 };
 
-type TurnPhase = 'normal' | 'dd-second' | 'haste-second' | 'redirect-pick' | 'momentum-bonus' | 'flanking-bonus';
+const toGameState = (engine: HyperXOGame, lastMove?: MoveEntry) =>
+  toGameState(engine, 'local', lastMove);
 
-function engineToGameState(engine: HyperXOGame, lastMove?: { player: string; boardIndex: number; cellIndex: number }): GameState {
-  const moves = availableMoves(engine);
-  return {
-    id: 'local',
-    currentPlayer: engine.currentPlayer,
-    nextBoardIndex: engine.nextBoardIndex,
-    winner: engine.winner,
-    drawn: engine.drawn,
-    boards: engine.boards.map((b, i) => ({
-      index: i,
-      cells: b.cells.map(c => c === '' ? '' : c),
-      winner: b.winner,
-      drawn: b.drawn,
-      condemned: b.condemned,
-    })),
-    availableMoves: moves.map(([board, cell]) => ({ board, cell })),
-    availableBoards: [...new Set(moves.map(([b]) => b))].sort((a, b) => a - b),
-    moveLog: [],
-    lastMove,
-    aiPending: false,
-  };
-}
-
-function isBoardLive(engine: HyperXOGame, idx: number): boolean {
-  const b = engine.boards[idx];
-  return !b.winner && !b.drawn && !b.condemned && b.cells.some(c => c === '');
-}
-
-export default function GameView({ difficulty, playerSymbol, aiName, mode, draft, onBack }: Props) {
+export default function GameView({ difficulty, playerSymbol, aiName, mode, draft, playerBan, aiBan, onBack }: Props) {
   const [game, setGame] = useState<GameState | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [playerPU, setPlayerPU] = useState<PowerUpState | null>(null);
@@ -83,7 +71,10 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   const [siegeThreats, setSiegeThreats] = useState<SiegeThreat[]>([]);
   const [flashBoards, setFlashBoards] = useState<Map<number, string>>(new Map());
   const [recallSource, setRecallSource] = useState<{ boardIdx: number; cellIdx: number } | null>(null);
+  const [aiNotification, setAiNotification] = useState<string | null>(null);
+  const [aiPUDisplay, setAiPUDisplay] = useState<PowerUpState | null>(null);
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const notifTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const engineRef = useRef<HyperXOGame | null>(null);
   const aiRef = useRef<MinimaxAI | null>(null);
   const siegeRef = useRef<SiegeThreat[]>([]);
@@ -91,8 +82,15 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   const hasteFirstRef = useRef(false);
   const preCardWinnersRef = useRef<(Player | null)[] | null>(null);
 
+  // AI gambit state
+  const aiDraftRef = useRef<PowerUpDraft | null>(null);
+  const aiPURef = useRef<PowerUpState | null>(null);
+  const aiSiegeRef = useRef<SiegeThreat[]>([]);
+  const aiHastePendingRef = useRef(false);
+
   const aiSymbol = playerSymbol === 'X' ? 'O' : 'X';
   const doctrine = draft?.doctrine ?? null;
+  const aiDoctrine = aiDraftRef.current?.doctrine ?? null;
 
   const triggerFlash = useCallback((boards: number[], color: string) => {
     if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
@@ -103,8 +101,30 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     }, 600);
   }, []);
 
+  const showAiNotification = useCallback((msg: string) => {
+    if (notifTimeoutRef.current) clearTimeout(notifTimeoutRef.current);
+    setAiNotification(msg);
+    notifTimeoutRef.current = setTimeout(() => {
+      setAiNotification(null);
+      notifTimeoutRef.current = null;
+    }, 2000);
+  }, []);
+
+  /** Sync both players' remaining cards onto the AI's cardCtx so minimax eval is card-aware. */
+  const syncCardContext = useCallback(() => {
+    const ai = aiRef.current;
+    const aiPU = aiPURef.current;
+    if (!ai || !draft) { if (ai) ai.cardCtx = null; return; }
+    const myCards = aiPU ? getAvailableCards(aiPU).map(String) : [];
+    const opponentCards = playerPU ? getAvailableCards(playerPU).map(String) : [];
+    ai.cardCtx = { myCards, opponentCards };
+  }, [draft, playerPU]);
+
   useEffect(() => {
-    return () => { if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current); };
+    return () => {
+      if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current);
+      if (notifTimeoutRef.current) clearTimeout(notifTimeoutRef.current);
+    };
   }, []);
 
   const updateSiege = useCallback((threats: SiegeThreat[]) => {
@@ -123,83 +143,287 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   }, [doctrine, siegeThreats]);
 
   const refreshGame = useCallback((lastMove?: { player: string; boardIndex: number; cellIndex: number }) => {
-    if (engineRef.current) setGame(engineToGameState(engineRef.current, lastMove));
+    if (engineRef.current) setGame(toGameState(engineRef.current, lastMove));
   }, []);
+
+  // ---- AI passive handling after AI moves ----
+
+  const completeAfterAiMove = useCallback(function completeAfterAiMoveInner(
+    engine: HyperXOGame,
+    prevWinners: (Player | null)[],
+    lastMove: { player: string; boardIndex: number; cellIndex: number },
+    hastePending: boolean,
+  ): void {
+    if (engine.winner || engine.drawn) {
+      setGame(toGameState(engine, lastMove));
+      setAiThinking(false);
+      return;
+    }
+
+    const ai = aiRef.current!;
+    const newlyWon = getNewlyWonBoards(engine, prevWinners);
+    const aiWonBoard = newlyWon.some(w => w.winner === aiSymbol);
+
+    // AI siege refresh after AI's own move
+    if (aiDoctrine === 'siege') {
+      aiSiegeRef.current = refreshSiegeThreats(aiSiegeRef.current, engine, aiSymbol as Player);
+    }
+
+    // Player siege advance after AI move
+    if (doctrine === 'siege') {
+      const result = advanceSiegeThreats(siegeRef.current, engine, playerSymbol as Player);
+      for (const claim of result.claimed) {
+        applySiegeClaim(engine, claim.boardIdx, claim.cellIdx, playerSymbol as Player);
+      }
+      updateSiege(result.updated);
+      if (result.claimed.length > 0) {
+        triggerFlash(result.claimed.map(c => c.boardIdx), 'amber');
+      }
+      if (engine.winner || engine.drawn) {
+        setGame(toGameState(engine, lastMove));
+        setAiThinking(false);
+        return;
+      }
+    }
+
+    // AI momentum: AI won a board → bonus turn
+    if (aiDoctrine === 'momentum' && aiWonBoard && !engine.winner && !engine.drawn) {
+      engine.currentPlayer = aiSymbol as Player;
+      engine.zkey ^= engine.zobrist.stmKey();
+      triggerFlash(
+        newlyWon.filter(w => w.winner === aiSymbol).map(w => w.i),
+        aiSymbol === 'X' ? 'cyan' : 'rose',
+      );
+      showAiNotification(`${aiName}: Momentum!`);
+      setGame(toGameState(engine, lastMove));
+
+      setTimeout(() => {
+        if (engine.winner || engine.drawn) { setAiThinking(false); return; }
+        const move2 = choose(ai, engine);
+        const prevW2 = engine.boards.map(b => b.winner);
+        applyMove(engine, move2[0], move2[1]);
+        const lastMove2 = { player: aiSymbol, boardIndex: move2[0], cellIndex: move2[1] };
+        completeAfterAiMoveInner(engine, prevW2, lastMove2, hastePending);
+      }, 400);
+      return;
+    }
+
+    // AI flanking: any board won → AI auto-places bonus piece
+    if (aiDoctrine === 'flanking' && newlyWon.length > 0 && !engine.winner && !engine.drawn) {
+      engine.currentPlayer = aiSymbol as Player;
+      engine.zkey ^= engine.zobrist.stmKey();
+      engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
+      engine.nextBoardIndex = null;
+      engine.zkey ^= engine.zobrist.nbiKey(null);
+      const bonusMove = choose(ai, engine);
+      const prevW2 = engine.boards.map(b => b.winner);
+      applyMove(engine, bonusMove[0], bonusMove[1]);
+      const flankLastMove = { player: aiSymbol, boardIndex: bonusMove[0], cellIndex: bonusMove[1] };
+      triggerFlash(newlyWon.map(w => w.i), 'emerald');
+      showAiNotification(`${aiName}: Flanking!`);
+      // Defer haste like the player path to avoid giving AI 3 turns
+      completeAfterAiMoveInner(engine, prevW2, flankLastMove, hastePending);
+      return;
+    }
+
+    // Player flanking: any board won after AI move → player bonus piece
+    if (doctrine === 'flanking' && newlyWon.length > 0 && !engine.winner && !engine.drawn) {
+      if (hastePending) aiHastePendingRef.current = true;
+      engine.currentPlayer = playerSymbol as Player;
+      engine.zkey ^= engine.zobrist.stmKey();
+      engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
+      engine.nextBoardIndex = null;
+      engine.zkey ^= engine.zobrist.nbiKey(null);
+      setTurnPhase('flanking-bonus');
+      setGame(toGameState(engine, lastMove));
+      triggerFlash(newlyWon.map(w => w.i), 'emerald');
+      setAiThinking(false);
+      return;
+    }
+
+    // AI haste second turn
+    if (hastePending && !engine.winner && !engine.drawn) {
+      engine.currentPlayer = aiSymbol as Player;
+      engine.zkey ^= engine.zobrist.stmKey();
+      setGame(toGameState(engine, lastMove));
+
+      setTimeout(() => {
+        if (engine.winner || engine.drawn) { setAiThinking(false); return; }
+        const move2 = choose(ai, engine);
+        const prevW2 = engine.boards.map(b => b.winner);
+        applyMove(engine, move2[0], move2[1]);
+        const lastMove2 = { player: aiSymbol, boardIndex: move2[0], cellIndex: move2[1] };
+        completeAfterAiMoveInner(engine, prevW2, lastMove2, false);
+      }, 300);
+      return;
+    }
+
+    // Normal: player's turn
+    setGame(toGameState(engine, lastMove));
+    setAiThinking(false);
+  }, [aiSymbol, aiName, aiDoctrine, doctrine, playerSymbol, triggerFlash, showAiNotification, updateSiege]);
+
+  // ---- Execute full AI turn (with card support) ----
 
   const doAiResponse = useCallback(() => {
     const engine = engineRef.current;
     const ai = aiRef.current;
     if (!engine || !ai || engine.winner || engine.drawn) return;
 
+    syncCardContext();
+    setAiThinking(true);
+
+    const aiPU = aiPURef.current;
+    const depthLevel = DIFFICULTY_PRESETS[difficulty].depth;
+
+    // Step 1: Decide card usage
+    const cardDecision = aiPU ? aiDecideCard(engine, aiPU, aiSymbol as Player, depthLevel) : null;
+
+    let preCardWinners: (Player | null)[] | null = null;
+    let flowCard: ActiveCard | null = null;
+
+    if (cardDecision) {
+      if (isPrePlacementCard(cardDecision.card)) {
+        // Pre-placement card: apply with delay for visual feedback
+        preCardWinners = engine.boards.map(b => b.winner);
+        applyAiPreCard(engine, cardDecision);
+        useCard(aiPU!, cardDecision.card);
+        setAiPUDisplay({ ...aiPU! });
+
+        const flashB = getCardFlashBoards(cardDecision);
+        const flashC = getCardFlashColor(cardDecision.card);
+        showAiNotification(`${aiName} used ${CARD_CATALOG[cardDecision.card].name}!`);
+        if (flashB.length > 0) triggerFlash(flashB, flashC);
+        setGame(toGameState(engine));
+
+        // Delay before normal move
+        setTimeout(() => {
+          if (engine.winner || engine.drawn) {
+            setGame(toGameState(engine));
+            setAiThinking(false);
+            return;
+          }
+          executeAiNormalMove(engine, ai, preCardWinners, null);
+        }, 600);
+        return;
+      } else {
+        // Flow modifier: mark for later
+        flowCard = cardDecision.card;
+        useCard(aiPU!, cardDecision.card);
+        setAiPUDisplay({ ...aiPU! });
+        showAiNotification(`${aiName} used ${CARD_CATALOG[cardDecision.card].name}!`);
+      }
+    }
+
+    // No pre-card delay needed
+    setTimeout(() => {
+      executeAiNormalMove(engine, ai, null, flowCard);
+    }, 50);
+  }, [aiSymbol, aiName, difficulty, triggerFlash, showAiNotification, syncCardContext]);
+
+  const executeAiNormalMove = useCallback((
+    engine: HyperXOGame,
+    ai: MinimaxAI,
+    preCardWinners: (Player | null)[] | null,
+    flowCard: ActiveCard | null,
+  ) => {
+    if (engine.winner || engine.drawn) {
+      setGame(toGameState(engine));
+      setAiThinking(false);
+      return;
+    }
+
+    const prevWinners = preCardWinners ?? engine.boards.map(b => b.winner);
+    const move = choose(ai, engine);
+    applyMove(engine, move[0], move[1]);
+    const lastMove = { player: aiSymbol, boardIndex: move[0], cellIndex: move[1] };
+
+    // Double-down: second piece on same board
+    if (flowCard === 'double-down' && !engine.winner && !engine.drawn && isBoardLive(engine, move[0])) {
+      engine.currentPlayer = aiSymbol as Player;
+      engine.zkey ^= engine.zobrist.stmKey();
+      engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
+      engine.nextBoardIndex = move[0];
+      engine.zkey ^= engine.zobrist.nbiKey(move[0]);
+      const move2 = choose(ai, engine);
+      applyMove(engine, move2[0], move2[1]);
+    }
+    // If DD fizzled (board won by first piece), just proceed normally
+
+    // Redirect: pick target after placement
+    if (flowCard === 'redirect' && !engine.winner && !engine.drawn) {
+      const target = aiRedirectTarget(engine, aiSymbol as Player);
+      if (target >= 0) {
+        try { applyRedirect(engine, target); } catch { /* invalid target */ }
+      }
+    }
+
+    // Haste: check passives, then take second turn
+    const hastePending = flowCard === 'haste' && !engine.winner && !engine.drawn;
+
+    completeAfterAiMove(engine, prevWinners, lastMove, hastePending);
+  }, [aiSymbol, completeAfterAiMove]);
+
+  // ---- Resumable AI turn (for haste second after player flanking) ----
+
+  const resumeAiTurn = useCallback(() => {
+    const engine = engineRef.current;
+    const ai = aiRef.current;
+    if (!engine || !ai || engine.winner || engine.drawn) return;
+
     setAiThinking(true);
     setTimeout(() => {
-      const prevWinners = engine.boards.map(b => b.winner);
       const move = choose(ai, engine);
+      const prevW = engine.boards.map(b => b.winner);
       applyMove(engine, move[0], move[1]);
       const lastMove = { player: aiSymbol, boardIndex: move[0], cellIndex: move[1] };
+      completeAfterAiMove(engine, prevW, lastMove, false);
+    }, 300);
+  }, [aiSymbol, completeAfterAiMove]);
 
-      // Siege: advance threats after opponent move
-      if (doctrine === 'siege') {
-        const result = advanceSiegeThreats(siegeRef.current, engine, playerSymbol as Player);
-        for (const claim of result.claimed) {
-          applySiegeClaim(engine, claim.boardIdx, claim.cellIdx, playerSymbol as Player);
-        }
-        updateSiege(result.updated);
-        if (result.claimed.length > 0) {
-          triggerFlash(result.claimed.map(c => c.boardIdx), 'amber');
-        }
-      }
+  // ---- Check passives after player's full turn, before AI responds ----
 
-      // Flanking: any board won after AI move → player bonus piece
-      if (doctrine === 'flanking' && !engine.winner && !engine.drawn) {
-        const newlyWon = engine.boards
-          .map((b, i) => ({ winner: b.winner, i }))
-          .filter(({ winner, i }) => winner && !prevWinners[i]);
-        if (newlyWon.length > 0) {
-          // Grant player a free placement anywhere (currentPlayer is already playerSymbol after AI's applyMove)
-          engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-          engine.nextBoardIndex = null;
-          engine.zkey ^= engine.zobrist.nbiKey(null);
-          setTurnPhase('flanking-bonus');
-          setGame(engineToGameState(engine, lastMove));
-          triggerFlash(newlyWon.map(w => w.i), 'emerald');
-          setAiThinking(false);
-          return;
-        }
-      }
-
-      setGame(engineToGameState(engine, lastMove));
-      setAiThinking(false);
-    }, 50);
-  }, [aiSymbol, doctrine, playerSymbol, triggerFlash, updateSiege]);
-
-  // Check passives after player's full turn, before AI responds
   const afterPlayerTurn = useCallback((
     engine: HyperXOGame,
     lastMove: { player: string; boardIndex: number; cellIndex: number },
     prevWinners: (Player | null)[],
   ) => {
     if (engine.winner || engine.drawn) {
-      setGame(engineToGameState(engine, lastMove));
+      setGame(toGameState(engine, lastMove));
       return;
     }
 
-    const newlyWon = engine.boards
-      .map((b, i) => ({ winner: b.winner, i }))
-      .filter(({ winner, i }) => winner && !prevWinners[i]);
+    const newlyWon = getNewlyWonBoards(engine, prevWinners);
     const playerWonBoard = newlyWon.some(w => w.winner === playerSymbol);
 
-    // Siege: refresh threats after player move
+    // Player siege refresh after player move
     if (doctrine === 'siege') {
       updateSiege(refreshSiegeThreats(siegeRef.current, engine, playerSymbol as Player));
     }
 
-    // Momentum: player won a board → bonus turn
-    if (doctrine === 'momentum' && playerWonBoard) {
+    // AI siege advance after player move
+    if (aiDoctrine === 'siege') {
+      const result = advanceSiegeThreats(aiSiegeRef.current, engine, aiSymbol as Player);
+      for (const claim of result.claimed) {
+        applySiegeClaim(engine, claim.boardIdx, claim.cellIdx, aiSymbol as Player);
+      }
+      aiSiegeRef.current = result.updated;
+      if (result.claimed.length > 0) {
+        triggerFlash(result.claimed.map(c => c.boardIdx), 'amber');
+        showAiNotification(`${aiName}: Siege claim!`);
+      }
+      if (engine.winner || engine.drawn) {
+        setGame(toGameState(engine, lastMove));
+        return;
+      }
+    }
+
+    // Player momentum: player won a board → bonus turn
+    if (doctrine === 'momentum' && playerWonBoard && !engine.winner && !engine.drawn) {
       engine.currentPlayer = playerSymbol as Player;
       engine.zkey ^= engine.zobrist.stmKey();
       setTurnPhase('momentum-bonus');
-      setGame(engineToGameState(engine, lastMove));
+      setGame(toGameState(engine, lastMove));
       triggerFlash(
         newlyWon.filter(w => w.winner === playerSymbol).map(w => w.i),
         playerSymbol === 'X' ? 'cyan' : 'rose',
@@ -207,15 +431,33 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       return;
     }
 
-    // Flanking: any board won → bonus piece anywhere
-    if (doctrine === 'flanking' && newlyWon.length > 0) {
+    // AI flanking: player won a board → AI gets bonus piece
+    if (aiDoctrine === 'flanking' && newlyWon.length > 0 && !engine.winner && !engine.drawn) {
+      const ai = aiRef.current!;
+      engine.currentPlayer = aiSymbol as Player;
+      engine.zkey ^= engine.zobrist.stmKey();
+      engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
+      engine.nextBoardIndex = null;
+      engine.zkey ^= engine.zobrist.nbiKey(null);
+      const bonusMove = choose(ai, engine);
+      applyMove(engine, bonusMove[0], bonusMove[1]);
+      triggerFlash(newlyWon.map(w => w.i), 'emerald');
+      showAiNotification(`${aiName}: Flanking!`);
+      // Continue — the flanking bonus might have changed state
+      // Recurse afterPlayerTurn to check for more passives
+      afterPlayerTurn(engine, lastMove, engine.boards.map(b => b.winner));
+      return;
+    }
+
+    // Player flanking: any board won → bonus piece anywhere
+    if (doctrine === 'flanking' && newlyWon.length > 0 && !engine.winner && !engine.drawn) {
       engine.currentPlayer = playerSymbol as Player;
       engine.zkey ^= engine.zobrist.stmKey();
       engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
       engine.nextBoardIndex = null;
       engine.zkey ^= engine.zobrist.nbiKey(null);
       setTurnPhase('flanking-bonus');
-      setGame(engineToGameState(engine, lastMove));
+      setGame(toGameState(engine, lastMove));
       triggerFlash(newlyWon.map(w => w.i), 'emerald');
       return;
     }
@@ -226,13 +468,15 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       engine.currentPlayer = playerSymbol as Player;
       engine.zkey ^= engine.zobrist.stmKey();
       setTurnPhase('haste-second');
-      setGame(engineToGameState(engine, lastMove));
+      setGame(toGameState(engine, lastMove));
       return;
     }
 
-    setGame(engineToGameState(engine, lastMove));
+    setGame(toGameState(engine, lastMove));
     doAiResponse();
-  }, [playerSymbol, doctrine, doAiResponse, triggerFlash, updateSiege]);
+  }, [playerSymbol, aiSymbol, aiName, doctrine, aiDoctrine, doAiResponse, triggerFlash, showAiNotification, updateSiege]);
+
+  // ---- Start new game ----
 
   const startNewGame = useCallback(() => {
     const engine = createEngine(mode);
@@ -245,15 +489,36 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     setRecallSource(null);
     setTurnPhase('normal');
     updateSiege([]);
+    setAiNotification(null);
+
+    // AI gambit setup
+    if (draft) {
+      // Collect bans: player's ban + AI's ban (AI ban was pre-generated)
+      const bannedSet = new Set<string>();
+      if (playerBan) bannedSet.add(playerBan);
+      if (aiBan) bannedSet.add(aiBan);
+      const aDraft = generateAiDraft(preset.depth, bannedSet);
+      aiDraftRef.current = aDraft;
+      const aPU = createPowerUpState(aDraft);
+      aiPURef.current = aPU;
+      aiSiegeRef.current = [];
+      aiHastePendingRef.current = false;
+      setAiPUDisplay({ ...aPU });
+    } else {
+      aiDraftRef.current = null;
+      aiPURef.current = null;
+      aiSiegeRef.current = [];
+      setAiPUDisplay(null);
+    }
 
     if (aiSymbol === 'X') {
       const move = choose(ai, engine);
       applyMove(engine, move[0], move[1]);
-      setGame(engineToGameState(engine, { player: aiSymbol, boardIndex: move[0], cellIndex: move[1] }));
+      setGame(toGameState(engine, { player: aiSymbol, boardIndex: move[0], cellIndex: move[1] }));
     } else {
-      setGame(engineToGameState(engine));
+      setGame(toGameState(engine));
     }
-  }, [difficulty, aiSymbol, mode, draft, updateSiege]);
+  }, [difficulty, aiSymbol, mode, draft, playerBan, aiBan, updateSiege]);
 
   useEffect(() => { startNewGame(); }, [startNewGame]);
 
@@ -270,11 +535,9 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     const engine = engineRef.current;
     if (!engine || !playerPU || engine.currentPlayer !== playerSymbol) return;
 
-    const def = CARD_CATALOG[card];
-
     setActivatingCard(card);
     setRecallSource(null);
-  }, [playerPU, playerSymbol, commitCard, refreshGame]);
+  }, [playerPU, playerSymbol]);
 
   const cancelActivation = useCallback(() => {
     setActivatingCard(null);
@@ -373,6 +636,15 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         applyMove(engine, boardIndex, cellIndex);
         const lastMove = { player: playerSymbol, boardIndex, cellIndex };
         setTurnPhase('normal');
+
+        // If AI has a pending haste second turn, resume it
+        if (aiHastePendingRef.current) {
+          aiHastePendingRef.current = false;
+          setGame(toGameState(engine, lastMove));
+          resumeAiTurn();
+          return;
+        }
+
         afterPlayerTurn(engine, lastMove, prevWinners);
         return;
       }
@@ -429,7 +701,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
           engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
           commitCard('double-down');
           setTurnPhase('dd-second');
-          setGame(engineToGameState(engine, lastMove));
+          setGame(toGameState(engine, lastMove));
           return;
         }
         // Board no longer live (first piece won it), just proceed normally
@@ -449,7 +721,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         commitCard('redirect');
         redirectPrevRef.current = { prevWinners, lastMove };
         setTurnPhase('redirect-pick');
-        setGame(engineToGameState(engine, lastMove));
+        setGame(toGameState(engine, lastMove));
         return;
       }
 
@@ -457,7 +729,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       setActivatingCard(null);
       afterPlayerTurn(engine, lastMove, prevWinners);
     },
-    [activatingCard, turnPhase, aiThinking, aiSymbol, playerSymbol, commitCard, refreshGame, doAiResponse, afterPlayerTurn]
+    [activatingCard, turnPhase, aiThinking, aiSymbol, playerSymbol, commitCard, refreshGame, doAiResponse, afterPlayerTurn, resumeAiTurn, triggerFlash]
   );
 
   // --- Compute targeting info ---
@@ -588,10 +860,28 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         labelO={playerSymbol === 'O' ? youLabel : aiLabel}
       />
 
+      {aiNotification && (
+        <div className="rounded-lg bg-indigo-500/10 border border-indigo-500/30 px-4 py-2 text-center">
+          <span className="text-indigo-400 text-sm font-semibold">{aiNotification}</span>
+        </div>
+      )}
+
       {phaseHint && (
         <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-4 py-2 text-center">
           <span className="text-amber-400 text-sm font-semibold">{phaseHint.label}</span>
           <span className="text-amber-400/70 text-xs block">{phaseHint.desc}</span>
+        </div>
+      )}
+
+      {aiPUDisplay && (
+        <div className="flex flex-col items-center gap-0.5">
+          <span className="text-xs text-zinc-600">{aiName}'s Gambits</span>
+          <CardTray
+            state={aiPUDisplay}
+            onActivate={() => {}}
+            activatingCard={null}
+            disabled={true}
+          />
         </div>
       )}
 

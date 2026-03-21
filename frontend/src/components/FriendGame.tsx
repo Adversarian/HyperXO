@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import type { GameState } from '../types';
-import type { PowerUpDraft, PowerUpState, ActiveCard, SiegeThreat } from '../engine/powerups';
+import type { GameState, TurnPhase, MoveEntry } from '../types';
+import type { PowerUpDraft, PowerUpState, ActiveCard, PowerUpCard, SiegeThreat } from '../engine/powerups';
 import {
   createPowerUpState,
   useCard,
@@ -23,9 +23,11 @@ import {
   type HyperXOGame,
   type Player,
 } from '../engine/game';
+import { engineToGameState as _engineToGameState, isBoardLive, getNewlyWonBoards } from '../engine/utils';
 import BigBoard from './BigBoard';
 import GameStatus from './GameStatus';
 import CardTray from './CardTray';
+import BanScreen from './BanScreen';
 import DraftScreen from './DraftScreen';
 
 interface Props {
@@ -37,45 +39,16 @@ interface Props {
   onBack: () => void;
 }
 
-type Phase = 'draft' | 'waiting-draft' | 'playing';
-type TurnPhase = 'normal' | 'dd-second' | 'haste-second' | 'redirect-pick' | 'momentum-bonus' | 'flanking-bonus';
+type Phase = 'ban' | 'waiting-bans' | 'draft' | 'waiting-draft' | 'playing';
 
-function engineToGameState(
-  engine: HyperXOGame,
-  lastMove?: { player: string; boardIndex: number; cellIndex: number },
-): GameState {
-  const moves = availableMoves(engine);
-  return {
-    id: 'p2p',
-    currentPlayer: engine.currentPlayer,
-    nextBoardIndex: engine.nextBoardIndex,
-    winner: engine.winner,
-    drawn: engine.drawn,
-    boards: engine.boards.map((b, i) => ({
-      index: i,
-      cells: b.cells.map(c => (c === '' ? '' : c)),
-      winner: b.winner,
-      drawn: b.drawn,
-      condemned: b.condemned,
-    })),
-    availableMoves: moves.map(([board, cell]) => ({ board, cell })),
-    availableBoards: [...new Set(moves.map(([b]) => b))].sort((a, b) => a - b),
-    moveLog: [],
-    lastMove,
-    aiPending: false,
-  };
-}
-
-function isBoardLive(engine: HyperXOGame, idx: number): boolean {
-  const b = engine.boards[idx];
-  return !b.winner && !b.drawn && !b.condemned && b.cells.some(c => c === '');
-}
+const toGameState = (engine: HyperXOGame, lastMove?: MoveEntry) =>
+  _engineToGameState(engine, 'p2p', lastMove);
 
 export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits, onBack }: Props) {
   // ===== Core state =====
   const [game, setGame] = useState<GameState | null>(null);
   const [peerLeft, setPeerLeft] = useState(false);
-  const [phase, setPhase] = useState<Phase>(gambits ? 'draft' : 'playing');
+  const [phase, setPhase] = useState<Phase>(gambits ? 'ban' : 'playing');
   const engineRef = useRef<HyperXOGame | null>(null);
 
   // ===== Gambit state =====
@@ -89,6 +62,10 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
   const [recallSource, setRecallSource] = useState<{ boardIdx: number; cellIdx: number } | null>(null);
 
   // ===== Refs (for WS handler closure stability) =====
+  const myBanRef = useRef<PowerUpCard | null>(null);
+  const myBanSubmitted = useRef(false);
+  const opponentBanRef = useRef<PowerUpCard | null | 'pending'>('pending');
+  const [allBans, setAllBans] = useState<Set<string>>(new Set());
   const myDraftRef = useRef<PowerUpDraft | null>(null);
   const opponentDraftRef = useRef<PowerUpDraft | null>(null);
   const myPURef = useRef<PowerUpState | null>(null);
@@ -142,7 +119,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
 
   const refreshGameView = useCallback(
     (lastMove?: { player: string; boardIndex: number; cellIndex: number }) => {
-      if (engineRef.current) setGame(engineToGameState(engineRef.current, lastMove));
+      if (engineRef.current) setGame(toGameState(engineRef.current, lastMove));
     },
     [],
   );
@@ -187,7 +164,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
     preCardWinnersRef.current = null;
     setOpponentCardNotice(null);
     setOpponentSiegeDisplay([]);
-    setGame(engineToGameState(engine));
+    setGame(toGameState(engine));
     setPhase('playing');
   }, [gambits, updateMySiege]);
 
@@ -195,10 +172,33 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
     if (!gambits) initGame();
   }, [gambits, initGame]);
 
-  // ===== Draft =====
+  // ===== Ban + Draft =====
+
+  const proceedToDraft = useCallback(() => {
+    const bans = new Set<string>();
+    if (myBanRef.current) bans.add(myBanRef.current);
+    if (opponentBanRef.current) bans.add(opponentBanRef.current);
+    setAllBans(bans);
+    setPhase('draft');
+  }, []);
+
+  const handleBanReady = useCallback(
+    (ban: PowerUpCard | null) => {
+      myBanRef.current = ban;
+      myBanSubmitted.current = true;
+      ws.send(JSON.stringify({ type: 'ban-ready', ban }));
+      // Check if opponent already sent their ban
+      if (opponentBanRef.current !== 'pending') {
+        proceedToDraft();
+      } else {
+        setPhase('waiting-bans');
+      }
+    },
+    [ws, proceedToDraft],
+  );
 
   const handleDraftReady = useCallback(
-    (draft: PowerUpDraft) => {
+    (draft: PowerUpDraft, _ban: PowerUpCard | null) => {
       myDraftRef.current = draft;
       ws.send(JSON.stringify({ type: 'draft-ready', draft }));
       if (opponentDraftRef.current) {
@@ -220,14 +220,12 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       lastMove: { player: string; boardIndex: number; cellIndex: number },
     ) => {
       if (engine.winner || engine.drawn) {
-        setGame(engineToGameState(engine, lastMove));
+        setGame(toGameState(engine, lastMove));
         return;
       }
 
       const other: Player = mover === 'X' ? 'O' : 'X';
-      const newlyWon = engine.boards
-        .map((b, i) => ({ winner: b.winner, i }))
-        .filter(({ winner, i }) => winner && !prevWinners[i]);
+      const newlyWon = getNewlyWonBoards(engine, prevWinners);
       const moverWonBoard = newlyWon.some(w => w.winner === mover);
 
       const moverDoc = getDoctrineOf(mover);
@@ -262,7 +260,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       }
 
       if (engine.winner || engine.drawn) {
-        setGame(engineToGameState(engine, lastMove));
+        setGame(toGameState(engine, lastMove));
         return;
       }
 
@@ -286,7 +284,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
             mover === 'X' ? 'cyan' : 'rose',
           );
         }
-        setGame(engineToGameState(engine, lastMove));
+        setGame(toGameState(engine, lastMove));
         return;
       }
 
@@ -306,7 +304,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
           turnPhaseRef.current = 'flanking-bonus';
           triggerFlash(deferred.boards, 'emerald');
         }
-        setGame(engineToGameState(engine, lastMove));
+        setGame(toGameState(engine, lastMove));
         return;
       }
 
@@ -325,7 +323,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
           turnPhaseRef.current = 'flanking-bonus';
           triggerFlash(newlyWon.map(w => w.i), 'emerald');
         }
-        setGame(engineToGameState(engine, lastMove));
+        setGame(toGameState(engine, lastMove));
         return;
       }
 
@@ -341,7 +339,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
           turnPhaseRef.current = 'flanking-bonus';
           triggerFlash(newlyWon.map(w => w.i), 'emerald');
         }
-        setGame(engineToGameState(engine, lastMove));
+        setGame(toGameState(engine, lastMove));
         return;
       }
 
@@ -358,11 +356,11 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
           setTurnPhase('haste-second');
           turnPhaseRef.current = 'haste-second';
         }
-        setGame(engineToGameState(engine, lastMove));
+        setGame(toGameState(engine, lastMove));
         return;
       }
 
-      setGame(engineToGameState(engine, lastMove));
+      setGame(toGameState(engine, lastMove));
     },
     [mySymbol, getDoctrineOf, triggerFlash, updateMySiege],
   );
@@ -583,7 +581,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
           engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
           setTurnPhase('dd-second');
           turnPhaseRef.current = 'dd-second';
-          setGame(engineToGameState(engine, lastMove));
+          setGame(toGameState(engine, lastMove));
           return;
         }
         // Board not live — dd wasted, undo switch
@@ -602,7 +600,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         redirectPendingRef.current = { prevWinners, lastMove };
         setTurnPhase('redirect-pick');
         turnPhaseRef.current = 'redirect-pick';
-        setGame(engineToGameState(engine, lastMove));
+        setGame(toGameState(engine, lastMove));
         return;
       }
 
@@ -620,6 +618,15 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       const msg = JSON.parse(ev.data);
       const engine = engineRef.current;
 
+      if (msg.type === 'ban-ready') {
+        opponentBanRef.current = msg.ban ?? null;
+        // If we already submitted our ban, proceed to draft
+        if (myBanSubmitted.current) {
+          proceedToDraft();
+        }
+        return;
+      }
+
       if (msg.type === 'draft-ready') {
         opponentDraftRef.current = msg.draft;
         if (myDraftRef.current) initGame();
@@ -633,6 +640,17 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
 
       if (msg.type === 'rematch-accept') {
         initGame();
+        return;
+      }
+
+      if (msg.type === 'redraft') {
+        myDraftRef.current = null;
+        opponentDraftRef.current = null;
+        myBanRef.current = null;
+        opponentBanRef.current = 'pending';
+        myBanSubmitted.current = false;
+        setAllBans(new Set());
+        setPhase('ban');
         return;
       }
 
@@ -724,7 +742,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
               engine.nextBoardIndex = msg.boardIndex;
               engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
               pending.ddStage = 1;
-              setGame(engineToGameState(engine, lastMove));
+              setGame(toGameState(engine, lastMove));
               return;
             }
             // Board not live, undo
@@ -760,7 +778,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         if (pending.opponentCard === 'redirect') {
           pending.opponentCard = null;
           redirectPendingRef.current = { prevWinners, lastMove };
-          setGame(engineToGameState(engine, lastMove));
+          setGame(toGameState(engine, lastMove));
           return;
         }
 
@@ -771,7 +789,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
 
     ws.addEventListener('message', handler);
     return () => ws.removeEventListener('message', handler);
-  }, [ws, mySymbol, opponentSymbol, initGame, refreshGameView, checkPassives, triggerFlash]);
+  }, [ws, mySymbol, opponentSymbol, initGame, proceedToDraft, refreshGameView, checkPassives, triggerFlash]);
 
   // ===== Targeting computation =====
 
@@ -858,8 +876,33 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
 
   // ==================== Render ====================
 
+  if (phase === 'ban') {
+    return (
+      <BanScreen
+        onBanReady={handleBanReady}
+        onBack={onBack}
+      />
+    );
+  }
+
+  if (phase === 'waiting-bans') {
+    return (
+      <div className="flex flex-col items-center gap-6 px-4">
+        <h2 className="text-zinc-200 text-lg font-semibold">
+          Waiting for {opponentName} to ban...
+        </h2>
+        {myBanRef.current && (
+          <div className="text-xs text-red-400/70 border border-red-500/20 rounded-lg px-3 py-1.5">
+            You banned: <span className="font-semibold text-red-400">{CARD_CATALOG[myBanRef.current].name}</span>
+          </div>
+        )}
+        <div className="text-zinc-500 animate-pulse text-sm">Both players must submit bans before drafting...</div>
+      </div>
+    );
+  }
+
   if (phase === 'draft') {
-    return <DraftScreen onReady={handleDraftReady} onBack={onBack} />;
+    return <DraftScreen onReady={handleDraftReady} onBack={onBack} banned={allBans.size > 0 ? allBans : undefined} />;
   }
 
   if (phase === 'waiting-draft') {
@@ -1034,17 +1077,23 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
           >
             Rematch
           </button>
-          <button
-            onClick={() => {
-              ws.send(JSON.stringify({ type: 'rematch-accept' }));
-              myDraftRef.current = null;
-              opponentDraftRef.current = null;
-              setPhase('draft');
-            }}
-            className="rounded-xl border border-zinc-700 bg-zinc-800/50 px-6 py-3 text-zinc-300 font-semibold hover:bg-zinc-700/50 hover:border-zinc-600 transition-all active:scale-[0.98]"
-          >
-            Re-draft
-          </button>
+          {gambits && (
+            <button
+              onClick={() => {
+                myDraftRef.current = null;
+                opponentDraftRef.current = null;
+                myBanRef.current = null;
+                opponentBanRef.current = 'pending';
+                myBanSubmitted.current = false;
+                setAllBans(new Set());
+                setPhase('ban');
+                ws.send(JSON.stringify({ type: 'redraft' }));
+              }}
+              className="rounded-xl border border-zinc-700 bg-zinc-800/50 px-6 py-3 text-zinc-300 font-semibold hover:bg-zinc-700/50 hover:border-zinc-600 transition-all active:scale-[0.98]"
+            >
+              Re-draft
+            </button>
+          )}
         </div>
       )}
     </div>

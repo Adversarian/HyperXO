@@ -1,7 +1,10 @@
 import { useState, useCallback, useRef } from 'react';
 import type { Difficulty, Screen, GameMode } from './types';
-import type { PowerUpDraft } from './engine/powerups';
+import type { PowerUpDraft, PowerUpCard } from './engine/powerups';
+import { DIFFICULTY_PRESETS } from './engine/ai';
+import { aiBan as generateAiBan } from './engine/ai-gambits';
 import Menu from './components/Menu';
+import BanScreen from './components/BanScreen';
 import DraftScreen from './components/DraftScreen';
 import GameView from './components/GameView';
 import Lobby from './components/Lobby';
@@ -16,6 +19,8 @@ export default function App() {
   const [aiName, setAiName] = useState('Novax');
   const [gameMode, setGameMode] = useState<GameMode>('classic');
   const [playerDraft, setPlayerDraft] = useState<PowerUpDraft | null>(null);
+  const [playerBan, setPlayerBan] = useState<PowerUpCard | null>(null);
+  const [aiBanCard, setAiBanCard] = useState<PowerUpCard | null>(null);
   const [friendWs, setFriendWs] = useState<WebSocket | null>(null);
   const [myName, setMyName] = useState('');
   const [opponentName, setOpponentName] = useState('');
@@ -51,14 +56,31 @@ export default function App() {
         setAiName(name);
         setGameMode(mode);
         setPlayerDraft(null);
-        setScreen(powerUps ? 'draft' : 'game');
+        setPlayerBan(null);
+        if (powerUps) {
+          // Generate AI's ban independently (hidden until player also bans)
+          setAiBanCard(generateAiBan(DIFFICULTY_PRESETS[d].depth, mode));
+        } else {
+          setAiBanCard(null);
+        }
+        setScreen(powerUps ? 'ban' : 'game');
       });
     },
     [transitionTo]
   );
 
+  const handleBanReady = useCallback(
+    (ban: PowerUpCard | null) => {
+      transitionTo(() => {
+        setPlayerBan(ban);
+        setScreen('draft');
+      });
+    },
+    [transitionTo],
+  );
+
   const handleDraftReady = useCallback(
-    (draft: PowerUpDraft) => {
+    (draft: PowerUpDraft, _ban: PowerUpCard | null) => {
       transitionTo(() => {
         setPlayerDraft(draft);
         setScreen('game');
@@ -130,12 +152,25 @@ export default function App() {
           />
         )}
 
+        {screen === 'ban' && (
+          <BanScreen onBanReady={handleBanReady} onBack={goMenu} />
+        )}
+
         {screen === 'draft' && (
-          <DraftScreen onReady={handleDraftReady} onBack={goMenu} />
+          <DraftScreen
+            onReady={handleDraftReady}
+            onBack={goMenu}
+            banned={(() => {
+              const bans = new Set<string>();
+              if (playerBan) bans.add(playerBan);
+              if (aiBanCard) bans.add(aiBanCard);
+              return bans.size > 0 ? bans : undefined;
+            })()}
+          />
         )}
 
         {screen === 'game' && (
-          <GameView difficulty={difficulty} playerSymbol={playerSymbol} aiName={aiName} mode={gameMode} draft={playerDraft} onBack={goMenu} />
+          <GameView difficulty={difficulty} playerSymbol={playerSymbol} aiName={aiName} mode={gameMode} draft={playerDraft} playerBan={playerBan} aiBan={aiBanCard} onBack={goMenu} />
         )}
 
         {screen === 'lobby-create' && !friendWs && (
