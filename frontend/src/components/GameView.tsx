@@ -337,7 +337,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         executeAiNormalMove(engine, ai, null, flowCard);
       } catch (e) { console.error('AI move error:', e); setAiThinking(false); }
     }, flowCard ? 800 : 500);
-  }, [aiSymbol, aiName, difficulty, triggerFlash, logEvent, syncCardContext]);
+  }, [aiSymbol, aiName, difficulty, triggerFlash, logEvent, syncCardContext, executeAiNormalMove]);
 
   const executeAiNormalMove = useCallback((
     engine: HyperXOGame,
@@ -758,7 +758,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       setActivatingCard(null);
       afterPlayerTurn(engine, lastMove, prevWinners);
     },
-    [activatingCard, turnPhase, aiThinking, aiSymbol, playerSymbol, commitCard, refreshGame, doAiResponse, afterPlayerTurn, resumeAiTurn, triggerFlash]
+    [activatingCard, turnPhase, aiThinking, playerSymbol, commitCard, refreshGame, doAiResponse, afterPlayerTurn, resumeAiTurn, triggerFlash, logEvent, recallSource]
   );
 
   // --- Compute targeting info ---

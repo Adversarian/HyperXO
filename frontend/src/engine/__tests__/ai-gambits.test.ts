@@ -4,7 +4,9 @@ import {
   createPowerUpState,
   useCard,
   type PowerUpDraft,
-  type ActiveCard,
+  type StrikeCard,
+  type TacticsCard,
+  type DisruptionCard,
   STRIKE_CARDS,
   TACTICS_CARDS,
   DISRUPTION_CARDS,
@@ -37,9 +39,9 @@ function makeDraft(overrides: Partial<PowerUpDraft> = {}): PowerUpDraft {
   };
 }
 
-function setupBoard(game: HyperXOGame, boardIdx: number, cells: string[]): void {
+function setupBoard(game: HyperXOGame, boardIdx: number, cells: ('X' | 'O' | '')[]): void {
   for (let i = 0; i < 9; i++) {
-    game.boards[boardIdx].cells[i] = cells[i] as any;
+    game.boards[boardIdx].cells[i] = cells[i];
   }
 }
 
@@ -994,15 +996,15 @@ describe('integration - card decision flow', () => {
     applyMove(game, 4, 0); // O plays
     game.currentPlayer = 'X';
 
-    // Test with every possible active card
-    const allActiveCards: ActiveCard[] = [
-      'double-down', 'haste', 'overwrite',
-      'redirect', 'recall', 'condemn',
-      'swap', 'shatter', 'sabotage',
+    // Test each active card in its proper category slot
+    const cardsByCategory: { strike: StrikeCard; tactics: TacticsCard; disruption: DisruptionCard }[] = [
+      { strike: 'double-down', tactics: 'redirect', disruption: 'swap' },
+      { strike: 'haste', tactics: 'recall', disruption: 'shatter' },
+      { strike: 'overwrite', tactics: 'condemn', disruption: 'sabotage' },
     ];
 
-    for (const card of allActiveCards) {
-      const draft = makeDraft({ strike: card as any, tactics: card as any, disruption: card as any });
+    for (const combo of cardsByCategory) {
+      const draft = makeDraft(combo);
       const puState = createPowerUpState(draft);
       // Should not throw
       expect(() => aiDecideCard(game, puState, 'X', 8)).not.toThrow();

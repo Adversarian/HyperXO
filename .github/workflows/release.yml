@@ -29,7 +29,7 @@ jobs:
 
       - name: Lint
         working-directory: frontend
-        run: npx eslint . --max-warnings 50
+        run: npx eslint . --max-warnings 0
 
       - name: Run tests
         working-directory: frontend

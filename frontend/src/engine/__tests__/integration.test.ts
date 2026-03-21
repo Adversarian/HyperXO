@@ -430,8 +430,8 @@ function simulateFullGame(config: SimConfig): SimResult {
     // Assert invariants before the turn
     try {
       assertGameInvariant(game, `Turn ${turn + 1} pre (${game.currentPlayer})`);
-    } catch (e: any) {
-      result.errors.push(e.message);
+    } catch (e: unknown) {
+      result.errors.push((e as Error).message);
       break;
     }
 
@@ -439,8 +439,8 @@ function simulateFullGame(config: SimConfig): SimResult {
     let turnResult: TurnResult;
     try {
       turnResult = executeAiTurn(game, current, other, difficulty);
-    } catch (e: any) {
-      result.errors.push(`Turn ${turn + 1} (${game.currentPlayer}): ${e.message}`);
+    } catch (e: unknown) {
+      result.errors.push(`Turn ${turn + 1} (${game.currentPlayer}): ${(e as Error).message}`);
       break;
     }
 
@@ -468,8 +468,8 @@ function simulateFullGame(config: SimConfig): SimResult {
       if (!game.winner && !game.drawn) {
         assertGameInvariant(game, `Turn ${turn + 1} post (${current.ai.player})`);
       }
-    } catch (e: any) {
-      result.errors.push(e.message);
+    } catch (e: unknown) {
+      result.errors.push((e as Error).message);
       break;
     }
   }

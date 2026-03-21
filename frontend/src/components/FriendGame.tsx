@@ -386,7 +386,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       setActivatingCard(card);
       setRecallSource(null);
     },
-    [mySymbol, commitMyCard, refreshGameView, ws],
+    [mySymbol],
   );
 
   const cancelActivation = useCallback(() => {
@@ -608,7 +608,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       setActivatingCard(null);
       checkPassives(engine, mySymbol as Player, prevWinners, lastMove);
     },
-    [activatingCard, mySymbol, commitMyCard, refreshGameView, ws, checkPassives, triggerFlash],
+    [activatingCard, mySymbol, commitMyCard, refreshGameView, ws, checkPassives, triggerFlash, recallSource],
   );
 
   // ===== WS message handler =====
