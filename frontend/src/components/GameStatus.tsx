@@ -1,4 +1,5 @@
 import type { GameState } from '../types';
+import Mark from './Mark';
 
 interface PlayerLabel {
   turn: string;   // e.g. "Your turn" or "Alice's turn"
@@ -18,7 +19,7 @@ export default function GameStatus({ game, labelX, labelO }: Props) {
     const isX = game.winner === 'X';
     const label = labelFor(game.winner);
     return (
-      <div className={`text-center px-6 py-2 rounded-full ${
+      <div className={`text-center px-6 py-2 rounded-full animate-winner-glow ${
         isX ? 'bg-cyan-500/10 ring-1 ring-cyan-500/30' : 'bg-rose-500/10 ring-1 ring-rose-500/30'
       }`}>
         <span className={`text-2xl font-bold ${isX ? 'text-cyan-400' : 'text-rose-400'}`}>
@@ -30,7 +31,7 @@ export default function GameStatus({ game, labelX, labelO }: Props) {
 
   if (game.drawn) {
     return (
-      <div className="text-center px-6 py-2 rounded-full bg-zinc-800 ring-1 ring-zinc-700">
+      <div className="text-center px-6 py-2 rounded-full bg-zinc-800 ring-1 ring-zinc-700 animate-draw-in">
         <span className="text-2xl font-bold text-zinc-400">Draw!</span>
       </div>
     );
@@ -44,7 +45,7 @@ export default function GameStatus({ game, labelX, labelO }: Props) {
       isX ? 'bg-cyan-500/10 ring-1 ring-cyan-500/20' : 'bg-rose-500/10 ring-1 ring-rose-500/20'
     }`}>
       <span className={`text-lg font-bold ${isX ? 'text-cyan-400' : 'text-rose-400'}`}>
-        {game.currentPlayer}
+        <Mark mark={game.currentPlayer} />
       </span>
       <span className="text-zinc-400 text-sm">
         {game.aiPending ? '' : `- ${label.turn}`}

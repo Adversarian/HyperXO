@@ -43,6 +43,7 @@ import BigBoard from './BigBoard';
 import GameStatus from './GameStatus';
 import CardTray from './CardTray';
 import CombatLog, { type LogEntry, createLogEntry } from './CombatLog';
+import Mark from './Mark';
 
 interface Props {
   difficulty: Difficulty;
@@ -897,9 +898,9 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
           &larr; Menu
         </button>
         <div className="flex items-center gap-3">
-          <span className={`text-sm font-medium ${playerSymbol === 'X' ? 'text-cyan-400' : 'text-rose-400'}`}>You ({playerSymbol})</span>
+          <span className={`text-sm font-medium inline-flex items-center gap-1 ${playerSymbol === 'X' ? 'text-cyan-400' : 'text-rose-400'}`}>You <Mark mark={playerSymbol} /></span>
           <span className="text-zinc-600 text-xs">vs</span>
-          <span className={`text-sm font-medium ${aiSymbol === 'X' ? 'text-cyan-400' : 'text-rose-400'}`}>{aiName} ({aiSymbol})</span>
+          <span className={`text-sm font-medium inline-flex items-center gap-1 ${aiSymbol === 'X' ? 'text-cyan-400' : 'text-rose-400'}`}>{aiName} <Mark mark={aiSymbol} /></span>
           {mode !== 'classic' && (
             <span className="text-xs text-zinc-500 border border-zinc-700 rounded px-1.5 py-0.5">{MODE_LABELS[mode]}</span>
           )}

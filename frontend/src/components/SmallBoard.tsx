@@ -1,4 +1,5 @@
 import type { BoardState } from '../types';
+import Mark from './Mark';
 
 interface Props {
   board: BoardState;
@@ -25,6 +26,22 @@ const FLASH_CLASSES: Record<string, string> = {
   indigo: 'bg-indigo-500/40',
 };
 
+const WIN_LINES: [number, number, number][] = [
+  [0, 1, 2], [3, 4, 5], [6, 7, 8],
+  [0, 3, 6], [1, 4, 7], [2, 5, 8],
+  [0, 4, 8], [2, 4, 6],
+];
+
+/** Find the first winning line's start and end cell indices. */
+function getWinLine(cells: string[], winner: string): [number, number] | null {
+  for (const [a, b, c] of WIN_LINES) {
+    if (cells[a] === winner && cells[b] === winner && cells[c] === winner) {
+      return [a, c];
+    }
+  }
+  return null;
+}
+
 export default function SmallBoard({
   board,
   bigIndex,
@@ -39,6 +56,7 @@ export default function SmallBoard({
   siegeCells,
 }: Props) {
   const resolved = board.winner || board.drawn || board.condemned;
+  const winLine = board.winner ? getWinLine(board.cells, board.winner) : null;
 
   const bgColor = resolved
     ? board.winner === 'X'
@@ -56,28 +74,51 @@ export default function SmallBoard({
 
   return (
     <div className={`relative grid grid-cols-3 grid-rows-3 gap-0.5 sm:gap-1 rounded-lg sm:rounded-xl p-1 sm:p-1.5 transition-all duration-200 ${bgColor}`}>
-      {/* Won/drawn overlay */}
+      {/* Win line SVG — inset by padding, viewBox maps to cell grid */}
+      {board.winner && winLine && !targetMode && (() => {
+        const cx = (i: number) => (i % 3) * 2 + 1;
+        const cy = (i: number) => Math.floor(i / 3) * 2 + 1;
+        return (
+          <svg className="absolute inset-[4px] sm:inset-[6px] z-10 pointer-events-none" viewBox="0 0 6 6">
+            <line
+              x1={cx(winLine[0])} y1={cy(winLine[0])}
+              x2={cx(winLine[1])} y2={cy(winLine[1])}
+              stroke="#fbbf24"
+              strokeWidth="0.18"
+              strokeLinecap="round"
+              opacity="0.6"
+              className="animate-win-line"
+            />
+          </svg>
+        );
+      })()}
+
+      {/* Won/drawn/condemned overlay — delayed stamp for wins, hover to peek */}
       {resolved && !targetMode && (
-        <div className={`absolute inset-0 z-10 flex items-center justify-center rounded-xl ${
-          board.winner === 'X'
-            ? 'bg-cyan-950'
-            : board.winner === 'O'
-              ? 'bg-rose-950'
-              : board.condemned
-                ? 'bg-red-950/90'
-                : 'bg-zinc-900'
+        <div className={`absolute inset-0 z-10 group ${
+          board.winner ? 'animate-board-stamp' : 'animate-fade-in'
         }`}>
-          <span className={`text-3xl sm:text-6xl font-black drop-shadow-lg ${
+          <div className={`w-full h-full flex items-center justify-center rounded-xl transition-opacity duration-200 group-hover:opacity-40 ${
             board.winner === 'X'
-              ? 'text-cyan-400'
+              ? 'bg-cyan-950'
               : board.winner === 'O'
-                ? 'text-rose-400'
+                ? 'bg-rose-950'
                 : board.condemned
-                  ? 'text-red-500/40 !text-xl sm:!text-4xl'
-                  : 'text-zinc-600 !text-xl sm:!text-4xl'
+                  ? 'bg-red-950/90'
+                  : 'bg-zinc-900'
           }`}>
-            {board.winner ?? (board.condemned ? '\u2298' : 'Draw')}
-          </span>
+            {board.winner ? (
+              <Mark mark={board.winner} className={`!w-8 !h-8 sm:!w-14 sm:!h-14 drop-shadow-lg ${
+                board.winner === 'X' ? 'text-cyan-400' : 'text-rose-400'
+              }`} />
+            ) : (
+              <span className={`text-xl sm:text-4xl font-black drop-shadow-lg ${
+                board.condemned ? 'text-red-500/40' : 'text-zinc-600'
+              }`}>
+                {board.condemned ? '\u2298' : 'Draw'}
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -112,8 +153,8 @@ export default function SmallBoard({
               else if (playable) onCellClick(bigIndex, cellIdx);
             }}
             className={`
-              relative flex h-8 w-8 items-center justify-center rounded text-sm font-bold transition-all duration-150
-              sm:h-14 sm:w-14 sm:text-xl sm:rounded-md
+              relative flex w-full min-w-7 sm:min-w-12 aspect-square items-center justify-center rounded text-sm font-bold transition-all duration-150
+              sm:text-xl sm:rounded-md
               ${cell === 'X' ? 'text-cyan-400' : cell === 'O' ? 'text-rose-400' : ''}
               ${isLastMove && !targetMode ? 'ring-2 ring-yellow-400/70 bg-yellow-400/10' : ''}
               ${isTargetCell
@@ -126,7 +167,11 @@ export default function SmallBoard({
               }
             `}
           >
-            {cell || null}
+            {cell ? (
+              <span className={isLastMove && !targetMode ? 'animate-piece-pop inline-block' : ''}>
+                <Mark mark={cell} />
+              </span>
+            ) : null}
             {isSiegeThreat && (
               <div className="absolute inset-0 rounded bg-amber-500/20 animate-siege-pulse pointer-events-none" />
             )}

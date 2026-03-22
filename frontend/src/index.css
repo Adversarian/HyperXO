@@ -49,3 +49,59 @@
 .animate-fade-in {
   animation: fade-in 200ms ease-out;
 }
+
+/* Piece placement: pop-in */
+@keyframes piece-pop {
+  0%   { transform: scale(0); opacity: 0; }
+  60%  { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+.animate-piece-pop {
+  animation: piece-pop 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Win line: SVG stroke draws across winning cells */
+@keyframes win-line-draw {
+  from { stroke-dashoffset: 8; }
+  to   { stroke-dashoffset: 0; }
+}
+
+.animate-win-line {
+  stroke-dasharray: 8;
+  stroke-dashoffset: 8;
+  animation: win-line-draw 200ms ease-out forwards;
+}
+
+/* Board win: overlay stamp (delayed to appear after line finishes) */
+@keyframes board-stamp {
+  0%   { opacity: 0; transform: scale(1.6); }
+  60%  { opacity: 1; transform: scale(0.92); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.animate-board-stamp {
+  opacity: 0;
+  animation: board-stamp 300ms cubic-bezier(0.22, 1, 0.36, 1) 250ms forwards;
+}
+
+/* Game over: winner banner pulse */
+@keyframes winner-glow {
+  0%   { opacity: 0; transform: scale(0.9); }
+  50%  { transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.animate-winner-glow {
+  animation: winner-glow 400ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Draw banner fade-in */
+@keyframes draw-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.animate-draw-in {
+  animation: draw-in 300ms ease-out;
+}
