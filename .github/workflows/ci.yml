@@ -35,3 +35,52 @@ jobs:
       - name: Run tests
         working-directory: frontend
         run: npx vitest run
+
+  # Warm Rust release cache on main so tag-triggered release builds can restore it.
+  # GitHub Actions caches are ref-scoped; only default branch caches are shared with tags.
+  rust-cache:
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri -> target
+          shared-key: release-${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      - name: Build Rust dependencies
+        working-directory: frontend/src-tauri
+        shell: bash
+        run: |
+          mkdir -p ../dist
+          echo '<html></html>' > ../dist/index.html
+          cargo build --release 2>&1 || true

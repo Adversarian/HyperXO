@@ -73,6 +73,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: frontend/src-tauri -> target
+          shared-key: release-${{ matrix.target }}
 
       - name: Sync version from tag
         shell: bash
