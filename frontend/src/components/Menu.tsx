@@ -52,10 +52,8 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
         </button>
       </div>
 
-      {/* AI Game */}
+      {/* Game settings — shared across all play modes */}
       <div className="w-full max-w-lg flex flex-col gap-5">
-        <h2 className="text-zinc-300 text-lg font-medium text-center">Play vs. AI</h2>
-
         <div>
           <p className="text-zinc-500 text-xs text-center mb-2">Game Mode</p>
           <div className="grid grid-cols-3 gap-2">
@@ -78,6 +76,40 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
             ))}
           </div>
         </div>
+
+        <div className="flex items-center justify-center gap-3">
+          <span className="text-zinc-400 text-sm relative group cursor-default">
+            Gambits:
+            <span className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-48 rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-xs text-zinc-300 text-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
+              Draft tactical power-ups to spice up the game
+            </span>
+          </span>
+          <button
+            onClick={() => setPowerUps(false)}
+            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
+              !powerUps
+                ? 'bg-zinc-600 text-white'
+                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+            }`}
+          >
+            Off
+          </button>
+          <button
+            onClick={() => setPowerUps(true)}
+            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
+              powerUps
+                ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/25'
+                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+            }`}
+          >
+            On
+          </button>
+        </div>
+      </div>
+
+      {/* Play vs. AI */}
+      <div className="w-full max-w-lg flex flex-col gap-5">
+        <h2 className="text-zinc-300 text-lg font-medium text-center">Play vs. AI</h2>
 
         <div>
           <p className="text-zinc-500 text-xs text-center mb-2">Difficulty</p>
@@ -123,30 +155,6 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
             }`}
           >
             O (second)
-          </button>
-        </div>
-
-        <div className="flex items-center justify-center gap-3">
-          <span className="text-zinc-400 text-sm">Gambits:</span>
-          <button
-            onClick={() => setPowerUps(false)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
-              !powerUps
-                ? 'bg-zinc-600 text-white'
-                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
-            }`}
-          >
-            Off
-          </button>
-          <button
-            onClick={() => setPowerUps(true)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${
-              powerUps
-                ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/25'
-                : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
-            }`}
-          >
-            On
           </button>
         </div>
 

@@ -21,6 +21,8 @@ import {
   createGame as createEngine,
   availableMoves,
   applyMove,
+  validateWinner,
+  bigBoardState,
   type HyperXOGame,
   type Player,
 } from '../engine/game';
@@ -59,8 +61,25 @@ const MODE_LABELS: Record<GameMode, string> = {
   'misere': 'Misère',
 };
 
-const toGameState = (engine: HyperXOGame, lastMove?: MoveEntry) =>
-  engineToGameState(engine, 'local', lastMove);
+const toGameState = (engine: HyperXOGame, lastMove?: MoveEntry) => {
+  const gs = engineToGameState(engine, 'local', lastMove);
+  // Validate winner on game over to catch misattribution bugs
+  if (gs.winner || gs.drawn) {
+    const err = validateWinner(engine);
+    if (err) {
+      console.error('[HyperXO] WINNER VALIDATION FAILED:', err);
+      console.error('[HyperXO] Board state:', JSON.stringify({
+        bigBoard: bigBoardState(engine),
+        boardWinners: engine.boards.map(b => b.winner),
+        currentPlayer: engine.currentPlayer,
+        mode: engine.mode,
+        winner: engine.winner,
+        drawn: engine.drawn,
+      }));
+    }
+  }
+  return gs;
+};
 
 export default function GameView({ difficulty, playerSymbol, aiName, mode, draft, playerBan, aiBan, onBack }: Props) {
   const [game, setGame] = useState<GameState | null>(null);

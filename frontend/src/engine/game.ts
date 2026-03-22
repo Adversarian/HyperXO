@@ -91,6 +91,38 @@ export function createGame(mode: GameMode = 'classic'): HyperXOGame {
 
 // ---------- Queries ----------
 
+/** Independently verify that game.winner matches the actual board state. */
+export function validateWinner(game: HyperXOGame): string | null {
+  const bb = bigBoardState(game);
+
+  if (game.mode === 'sudden-death') {
+    const firstWon = game.boards.find(b => b.winner);
+    const expected = firstWon ? firstWon.winner : null;
+    if (game.winner !== expected) {
+      return `sudden-death: expected winner=${expected}, got winner=${game.winner}`;
+    }
+    return null;
+  }
+
+  // Classic / Misère: check macro lines
+  let lineWinner: Player | null = null;
+  for (const [a, b, c] of WINNING_LINES) {
+    if ((bb[a] === 'X' || bb[a] === 'O') && bb[a] === bb[b] && bb[b] === bb[c]) {
+      if (game.mode === 'misere') {
+        lineWinner = bb[a] === 'X' ? 'O' : 'X';
+      } else {
+        lineWinner = bb[a] as Player;
+      }
+      break;
+    }
+  }
+
+  if (game.winner !== lineWinner) {
+    return `${game.mode}: expected winner=${lineWinner}, got winner=${game.winner}, bigBoard=[${bb}]`;
+  }
+  return null;
+}
+
 export function bigBoardState(game: HyperXOGame): string[] {
   return game.boards.map(b =>
     b.winner === 'X' ? 'X'
