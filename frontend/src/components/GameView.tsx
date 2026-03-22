@@ -86,6 +86,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   const [aiThinking, setAiThinking] = useState(false);
   const [playerPU, setPlayerPU] = useState<PowerUpState | null>(null);
   const [activatingCard, setActivatingCard] = useState<ActiveCard | null>(null);
+  const [cardUsedThisTurn, setCardUsedThisTurn] = useState(false);
   const [turnPhase, setTurnPhase] = useState<TurnPhase>('normal');
   const [siegeThreats, setSiegeThreats] = useState<SiegeThreat[]>([]);
   const [flashBoards, setFlashBoards] = useState<Map<number, string>>(new Map());
@@ -285,6 +286,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     // Normal: player's turn
     setGame(toGameState(engine, lastMove));
     setAiThinking(false);
+    setCardUsedThisTurn(false);
   }, [aiSymbol, aiName, aiDoctrine, doctrine, playerSymbol, triggerFlash, logEvent, updateSiege]);
 
   // ---- Execute full AI turn (with card support) ----
@@ -529,6 +531,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     aiRef.current = ai;
     setPlayerPU(draft ? createPowerUpState(draft) : null);
     setActivatingCard(null);
+    setCardUsedThisTurn(false);
     setRecallSource(null);
     setTurnPhase('normal');
     updateSiege([]);
@@ -572,6 +575,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     markCardUsed(playerPU, card);
     setPlayerPU({ ...playerPU });
     setActivatingCard(null);
+    setCardUsedThisTurn(true);
   }, [playerPU]);
 
   const handleActivateCard = useCallback((card: ActiveCard) => {
@@ -958,7 +962,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
                 state={playerPU}
                 onActivate={handleActivateCard}
                 activatingCard={activatingCard}
-                disabled={!isPlayerTurn || turnPhase !== 'normal'}
+                disabled={!isPlayerTurn || turnPhase !== 'normal' || cardUsedThisTurn}
                 vertical
               />
             </div>
@@ -967,7 +971,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
                 state={playerPU}
                 onActivate={handleActivateCard}
                 activatingCard={activatingCard}
-                disabled={!isPlayerTurn || turnPhase !== 'normal'}
+                disabled={!isPlayerTurn || turnPhase !== 'normal' || cardUsedThisTurn}
               />
             </div>
             {activatingCard && (

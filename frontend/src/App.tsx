@@ -139,7 +139,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center py-8 sm:py-12">
+    <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center py-6 sm:py-10">
       <div
         className={`transition-all ${fade ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}
         style={{ transitionDuration: `${FADE_MS}ms` }}

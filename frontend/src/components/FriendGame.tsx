@@ -54,6 +54,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
   // ===== Gambit state =====
   const [myPU, setMyPU] = useState<PowerUpState | null>(null);
   const [activatingCard, setActivatingCard] = useState<ActiveCard | null>(null);
+  const [cardUsedThisTurn, setCardUsedThisTurn] = useState(false);
   const [turnPhase, setTurnPhase] = useState<TurnPhase>('normal');
   const [flashBoards, setFlashBoards] = useState<Map<number, string>>(new Map());
   const [opponentCardNotice, setOpponentCardNotice] = useState<string | null>(null);
@@ -152,6 +153,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       opponentPURef.current = null;
     }
     setActivatingCard(null);
+    setCardUsedThisTurn(false);
     setRecallSource(null);
     setTurnPhase('normal');
     turnPhaseRef.current = 'normal';
@@ -361,6 +363,8 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       }
 
       setGame(toGameState(engine, lastMove));
+      // Reset card usage for whoever's turn it now is
+      if (engine.currentPlayer === mySymbol) setCardUsedThisTurn(false);
     },
     [mySymbol, getDoctrineOf, triggerFlash, updateMySiege],
   );
@@ -373,6 +377,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       markCardUsed(myPURef.current, card);
       setMyPU({ ...myPURef.current });
       setActivatingCard(null);
+      setCardUsedThisTurn(true);
     },
     [],
   );
@@ -1053,7 +1058,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
             state={myPU}
             onActivate={handleActivateCard}
             activatingCard={activatingCard}
-            disabled={!isMyTurn || turnPhase !== 'normal'}
+            disabled={!isMyTurn || turnPhase !== 'normal' || cardUsedThisTurn}
           />
           {activatingCard && (
             <button

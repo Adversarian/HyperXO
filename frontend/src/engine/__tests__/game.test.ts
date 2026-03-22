@@ -5,6 +5,7 @@ import {
   applyMove,
   undoMove,
   captureUndo,
+  updateGlobalState,
   WINNING_LINES,
   type HyperXOGame,
 } from '../game';
@@ -239,5 +240,109 @@ describe('misère mode', () => {
     expect(game.winner).toBeNull();
     expect(game.currentPlayer).toBe('X');
     expect(game.zkey).toBe(prevHash);
+  });
+});
+
+describe('early macro draw', () => {
+  it('classic: game is drawn when every macro line is blocked', () => {
+    const game = createGame('classic');
+    // Set up a macro board where every line has both X and O:
+    //   X O X
+    //   O X O
+    //   O X O
+    // Lines: row0=[X,O,X] row1=[O,X,O] row2=[O,X,O] — all blocked
+    //        col0=[X,O,O] col1=[O,X,X] col2=[X,O,O] — all blocked
+    //        d1=[X,X,O]   d2=[X,X,O]  — all blocked
+    const winners: ('X' | 'O')[] = ['X','O','X','O','X','O','O','X','O'];
+    for (let i = 0; i < 9; i++) {
+      winBoard(game, i, winners[i]);
+    }
+    // Trigger updateGlobalState via a forced recalc
+    // We need to call it directly since all boards are won (no moves to make)
+    updateGlobalState(game);
+    expect(game.winner).toBeNull();
+    expect(game.drawn).toBe(true);
+  });
+
+  it('classic: game is NOT drawn when a macro line is still open', () => {
+    const game = createGame('classic');
+    // X wins boards 0 and 1, board 2 is open → top row still winnable by X
+    winBoard(game, 0, 'X');
+    winBoard(game, 1, 'X');
+    // Board 2 has no winner
+    // Other boards: mix to block other lines
+    winBoard(game, 3, 'O');
+    winBoard(game, 4, 'O');
+    winBoard(game, 5, 'X');
+    winBoard(game, 6, 'X');
+    winBoard(game, 7, 'O');
+    winBoard(game, 8, 'O');
+    updateGlobalState(game);
+    expect(game.winner).toBeNull();
+    expect(game.drawn).toBe(false); // top row [X, X, .] is still open
+  });
+
+  it('classic: early draw detected mid-game via applyMove', () => {
+    const game = createGame('classic');
+    // Set up 8 boards so that winning board 8 blocks the last open lines:
+    //   X O O     row0=[X,O,O] blocked
+    //   O X X     row1=[O,X,X] blocked
+    //   X O .     row2=[X,O,?]
+    // col0=[X,O,X] blocked, col1=[O,X,O] blocked, col2=[O,X,?]
+    // d1=[X,X,?] d2=[O,X,X] blocked
+    // If board 8 becomes O: row2=[X,O,O] blocked, col2=[O,X,O] blocked, d1=[X,X,O] blocked
+    // All lines blocked → draw!
+    const preset2: ('X' | 'O')[] = ['X','O','O','O','X','X','X','O'];
+    for (let i = 0; i < 8; i++) {
+      winBoard(game, i, preset2[i]);
+    }
+    // Board 8: set up O to win it with a move
+    game.boards[8].cells[0] = 'O';
+    game.boards[8].cells[1] = 'O';
+    game.nextBoardIndex = 8;
+    game.currentPlayer = 'O';
+    // Rebuild zkey
+    game.zkey = 0;
+    game.zkey ^= game.zobrist.nbiKey(8);
+    for (let bi = 0; bi < 9; bi++) {
+      for (let ci = 0; ci < 9; ci++) {
+        const cell = game.boards[bi].cells[ci];
+        if (cell === 'X' || cell === 'O') {
+          game.zkey ^= game.zobrist.pieceKey(bi, ci, cell);
+        }
+      }
+    }
+    game.zkey ^= game.zobrist.stmKey(); // O to move
+
+    applyMove(game, 8, 2); // O wins board 8 → all macro lines blocked
+    expect(game.boards[8].winner).toBe('O');
+    expect(game.winner).toBeNull();
+    expect(game.drawn).toBe(true);
+  });
+
+  it('misère: early draw when all macro lines are blocked', () => {
+    const game = createGame('misere');
+    // Same blocked layout — in misère, blocked lines also means draw
+    // (no one can complete a line, so no one can "lose")
+    const winners: ('X' | 'O')[] = ['X','O','O','O','X','X','X','O','O'];
+    for (let i = 0; i < 9; i++) {
+      winBoard(game, i, winners[i]);
+    }
+    updateGlobalState(game);
+    expect(game.winner).toBeNull();
+    expect(game.drawn).toBe(true);
+  });
+
+  it('sudden-death: no early macro draw (any board win ends game)', () => {
+    const game = createGame('sudden-death');
+    // In sudden death, macro lines don't matter — game ends on first board win
+    // Just verify the game doesn't falsely draw
+    game.currentPlayer = 'X';
+    game.nextBoardIndex = null;
+    game.zkey = 0;
+    game.zkey ^= game.zobrist.nbiKey(null);
+    applyMove(game, 0, 0); // X plays
+    expect(game.winner).toBeNull(); // no board won yet
+    expect(game.drawn).toBe(false);
   });
 });

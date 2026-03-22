@@ -38,22 +38,22 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
   };
 
   return (
-    <div className="flex flex-col items-center gap-8 px-4">
-      <div className="flex flex-col items-center gap-2">
+    <div className="flex flex-col items-center gap-5 px-4">
+      <div className="flex flex-col items-center gap-1">
         <h1 className="text-5xl sm:text-6xl font-bold tracking-tight bg-clip-text text-transparent animate-logo-glow">
           HyperXO
         </h1>
         <p className="text-zinc-500 text-sm">Ultimate Tic-Tac-Toe</p>
         <button
           onClick={openRules}
-          className="mt-2 px-4 py-1.5 rounded-full text-sm text-indigo-400 hover:text-indigo-300 border border-indigo-500/30 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-all"
+          className="mt-1.5 px-4 py-1.5 rounded-full text-sm text-indigo-400 hover:text-indigo-300 border border-indigo-500/30 hover:border-indigo-500/50 hover:bg-indigo-500/10 transition-all"
         >
           How to Play
         </button>
       </div>
 
       {/* Game settings — shared across all play modes */}
-      <div className="w-full max-w-lg flex flex-col gap-5">
+      <div className="w-full max-w-lg flex flex-col gap-3">
         <div>
           <p className="text-zinc-500 text-xs text-center mb-2">Game Mode</p>
           <div className="grid grid-cols-3 gap-2">
@@ -62,7 +62,7 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
                 key={m.value}
                 onClick={() => setMode(m.value)}
                 className={`
-                  flex flex-col items-center justify-center rounded-lg px-3 py-2.5 h-16 text-sm font-medium transition-all
+                  flex flex-col items-center justify-center rounded-lg px-3 py-2 h-14 text-sm font-medium transition-all
                   ${
                     mode === m.value
                       ? m.activeClass
@@ -108,7 +108,7 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
       </div>
 
       {/* Play vs. AI */}
-      <div className="w-full max-w-lg flex flex-col gap-5">
+      <div className="w-full max-w-lg flex flex-col gap-3">
         <h2 className="text-zinc-300 text-lg font-medium text-center">Play vs. AI</h2>
 
         <div>
@@ -119,7 +119,7 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
               key={d.value}
               onClick={() => setDifficulty(d.value)}
               className={`
-                flex flex-col items-center justify-center rounded-lg px-3 py-2.5 h-16 text-sm font-medium transition-all
+                flex flex-col items-center justify-center rounded-lg px-3 py-2 h-14 text-sm font-medium transition-all
                 ${
                   difficulty === d.value
                     ? d.activeClass
@@ -160,7 +160,7 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
 
         <button
           onClick={() => onStartAI(difficulty, symbol, DIFFICULTIES.find(d => d.value === difficulty)!.name, mode, powerUps)}
-          className="w-full rounded-xl bg-indigo-500 px-6 py-3 text-white font-semibold hover:bg-indigo-400 transition-colors shadow-lg shadow-indigo-500/25 active:scale-[0.98]"
+          className="w-full rounded-xl bg-indigo-500 px-6 py-2.5 text-white font-semibold hover:bg-indigo-400 transition-colors shadow-lg shadow-indigo-500/25 active:scale-[0.98]"
         >
           {powerUps ? 'Draft Gambits' : 'Start Game'}
         </button>
@@ -181,13 +181,13 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
             <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={onHostGame}
-                className="rounded-xl border border-zinc-700 bg-zinc-800/50 px-6 py-3 text-zinc-300 font-semibold hover:bg-zinc-700/50 hover:border-zinc-600 transition-all active:scale-[0.98]"
+                className="rounded-xl border border-zinc-700 bg-zinc-800/50 px-6 py-2.5 text-zinc-300 font-semibold hover:bg-zinc-700/50 hover:border-zinc-600 transition-all active:scale-[0.98]"
               >
                 Host Game
               </button>
               <button
                 onClick={onJoinGame}
-                className="rounded-xl border border-zinc-700 bg-zinc-800/50 px-6 py-3 text-zinc-300 font-semibold hover:bg-zinc-700/50 hover:border-zinc-600 transition-all active:scale-[0.98]"
+                className="rounded-xl border border-zinc-700 bg-zinc-800/50 px-6 py-2.5 text-zinc-300 font-semibold hover:bg-zinc-700/50 hover:border-zinc-600 transition-all active:scale-[0.98]"
               >
                 Join Game
               </button>

@@ -120,6 +120,23 @@ export function validateWinner(game: HyperXOGame): string | null {
   if (game.winner !== lineWinner) {
     return `${game.mode}: expected winner=${lineWinner}, got winner=${game.winner}, bigBoard=[${bb}]`;
   }
+
+  // Validate early macro draw: if game.drawn is true and no winner, check that
+  // every macro line is indeed blocked (or no moves remain)
+  if (game.drawn && !game.winner) {
+    let anyOpen = false;
+    for (const [a, b, c] of WINNING_LINES) {
+      const marks = [bb[a], bb[b], bb[c]];
+      if (!marks.includes('X') || !marks.includes('O')) {
+        anyOpen = true;
+        break;
+      }
+    }
+    if (anyOpen && availableMoves(game).length > 0) {
+      return `${game.mode}: game marked drawn but macro line still open, bigBoard=[${bb}]`;
+    }
+  }
+
   return null;
 }
 
@@ -243,6 +260,25 @@ export function updateGlobalState(game: HyperXOGame): void {
       return;
     }
   }
+
+  // Early macro draw: if every macro winning line is blocked
+  // (contains boards won by different players), neither player can win.
+  let anyMacroLineOpen = false;
+  for (const [a, b, c] of WINNING_LINES) {
+    const marks = [bb[a], bb[b], bb[c]];
+    const hasX = marks.includes('X');
+    const hasO = marks.includes('O');
+    // A line is still open if it doesn't have BOTH X and O board winners
+    if (!hasX || !hasO) {
+      anyMacroLineOpen = true;
+      break;
+    }
+  }
+  if (!anyMacroLineOpen) {
+    game.drawn = true;
+    return;
+  }
+
   if (availableMoves(game).length === 0) {
     game.drawn = true;
   }
@@ -261,19 +297,8 @@ export function applyMove(game: HyperXOGame, big: number, cell: number): void {
   board.cells[cell] = player;
   game.zkey ^= zobrist.pieceKey(big, cell, player);
 
-  // Update small board state
-  board.winner = null;
-  board.drawn = false;
-  for (const [a, b, c] of WINNING_LINES) {
-    const v = board.cells[a];
-    if (v !== '' && v === board.cells[b] && v === board.cells[c]) {
-      board.winner = v as Player;
-      break;
-    }
-  }
-  if (board.winner === null && board.cells.every(c => c !== '')) {
-    board.drawn = true;
-  }
+  // Update small board state (includes early draw detection)
+  recalcBoard(board);
 
   // Update macro result
   updateGlobalState(game);
