@@ -102,17 +102,17 @@ function filterBanned<T extends string>(
 // Used by AI to decide what to ban.
 const CARD_THREAT_CLASSIC: Record<string, number> = {
   'haste': 8, 'overwrite': 7, 'sabotage': 6, 'shatter': 6,
-  'redirect': 5, 'double-down': 5, 'momentum': 5, 'flanking': 5,
+  'redirect': 5, 'double-down': 5, 'momentum': 5, 'arsenal': 5,
   'condemn': 4, 'recall': 4, 'swap': 4, 'siege': 3,
 };
 const CARD_THREAT_SUDDEN_DEATH: Record<string, number> = {
   'haste': 10, 'overwrite': 9, 'double-down': 8, 'sabotage': 7,
-  'shatter': 7, 'redirect': 4, 'momentum': 4, 'flanking': 4,
+  'shatter': 7, 'redirect': 4, 'momentum': 4, 'arsenal': 4,
   'condemn': 3, 'recall': 3, 'swap': 3, 'siege': 2,
 };
 const CARD_THREAT_MISERE: Record<string, number> = {
   'swap': 9, 'condemn': 7, 'shatter': 7, 'sabotage': 6,
-  'overwrite': 5, 'redirect': 5, 'flanking': 5, 'momentum': 4,
+  'overwrite': 5, 'redirect': 5, 'arsenal': 5, 'momentum': 4,
   'recall': 4, 'haste': 3, 'double-down': 3, 'siege': 3,
 };
 
@@ -165,7 +165,7 @@ export function aiDraft(difficulty: number, banned?: Set<string>): PowerUpDraft 
   }
 
   // Card order: [double-down, haste, overwrite], [redirect, recall, condemn],
-  //             [swap, shatter, sabotage], [momentum, siege, flanking]
+  //             [swap, shatter, sabotage], [momentum, siege, arsenal]
   const isHard = difficulty > 5;
   const s = filterBanned(STRIKE_CARDS, isHard ? [1, 3, 4] : [2, 3, 3], b);
   const t = filterBanned(TACTICS_CARDS, isHard ? [4, 2, 2] : [3, 2, 2], b);

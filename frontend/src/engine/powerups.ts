@@ -14,7 +14,7 @@ export type PowerUpCategory = 'strike' | 'tactics' | 'disruption' | 'doctrine';
 export type StrikeCard = 'double-down' | 'haste' | 'overwrite';
 export type TacticsCard = 'redirect' | 'recall' | 'condemn';
 export type DisruptionCard = 'swap' | 'shatter' | 'sabotage';
-export type DoctrineCard = 'momentum' | 'siege' | 'flanking';
+export type DoctrineCard = 'momentum' | 'siege' | 'arsenal';
 
 export type ActiveCard = StrikeCard | TacticsCard | DisruptionCard;
 export type PowerUpCard = ActiveCard | DoctrineCard;
@@ -135,12 +135,12 @@ export const CARD_CATALOG: Record<PowerUpCard, CardDef> = {
     passive: true,
     targetType: 'none',
   },
-  'flanking': {
-    id: 'flanking',
-    name: 'Flanking',
+  'arsenal': {
+    id: 'arsenal',
+    name: 'Arsenal',
     category: 'doctrine',
-    description: 'When any board is won, place a bonus piece anywhere.',
-    flavor: 'Cascade',
+    description: 'When you win a board, recharge a random used card.',
+    flavor: 'Resupply',
     passive: true,
     targetType: 'none',
   },
@@ -151,7 +151,7 @@ export const CARD_CATALOG: Record<PowerUpCard, CardDef> = {
 export const STRIKE_CARDS: StrikeCard[] = ['double-down', 'haste', 'overwrite'];
 export const TACTICS_CARDS: TacticsCard[] = ['redirect', 'recall', 'condemn'];
 export const DISRUPTION_CARDS: DisruptionCard[] = ['swap', 'shatter', 'sabotage'];
-export const DOCTRINE_CARDS: DoctrineCard[] = ['momentum', 'siege', 'flanking'];
+export const DOCTRINE_CARDS: DoctrineCard[] = ['momentum', 'siege', 'arsenal'];
 
 export const CATEGORIES: { key: PowerUpCategory; label: string; cards: PowerUpCard[] }[] = [
   { key: 'strike', label: 'Strike', cards: STRIKE_CARDS },
@@ -459,4 +459,15 @@ export function applySiegeClaim(game: HyperXOGame, boardIdx: number, cellIdx: nu
   recalcBoard(board);
   updateGlobalState(game);
   sanitizeNextBoardIndex(game);
+}
+
+// ---- Arsenal passive helper ----
+
+/** Recharge a random used active card. Returns the recharged card name or null. */
+export function rechargeRandomCard(state: PowerUpState): ActiveCard | null {
+  const usedCards = getActiveCards(state.draft).filter(c => isCardUsed(state, c));
+  if (usedCards.length === 0) return null;
+  const pick = usedCards[Math.floor(Math.random() * usedCards.length)];
+  state.used[pick] = false;
+  return pick;
 }

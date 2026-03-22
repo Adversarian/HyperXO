@@ -50,7 +50,7 @@ Total possible loadouts: 3 x 3 x 3 x 3 = **81**.
 |------|--------|
 | **Momentum** | Whenever you win a small board, immediately take an extra turn before your opponent plays. |
 | **Siege** | Track your 2-in-a-row threats on each small board. If a threat goes unchallenged (opponent does not place in the blocking cell) for 3 consecutive turns, you automatically claim the 3rd cell and the board is checked for a win. |
-| **Flanking** | Whenever any board is won (by either player), you immediately place a bonus piece on any empty cell on any live board. |
+| **Arsenal** | Whenever you win a board, a random used active card is recharged (becomes available again). |
 
 ## Balance notes
 
@@ -60,8 +60,8 @@ Total possible loadouts: 3 x 3 x 3 x 3 = **81**.
 - **Categories ensure variety.** You always have one offensive, one tactical,
   one disruptive, and one passive tool. No all-offense or all-chaos decks.
 - **Passives set the pace.** Momentum snowballs board wins. Siege punishes
-  passive defense. Flanking floods the board with pieces after every board
-  completion. All three push the game toward faster resolution.
+  passive defense. Arsenal recycles spent cards, rewarding aggressive board
+  wins. All three push the game toward faster resolution.
 - **3 active uses in a 40-80 move game** means ~5% of turns have a power-up.
   Impactful moments without overwhelming the core game.
 

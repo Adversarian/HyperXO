@@ -16,6 +16,7 @@ import {
   refreshSiegeThreats,
   advanceSiegeThreats,
   applySiegeClaim,
+  rechargeRandomCard,
 } from '../engine/powerups';
 import {
   createGame as createEngine,
@@ -106,7 +107,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   const aiDraftRef = useRef<PowerUpDraft | null>(null);
   const aiPURef = useRef<PowerUpState | null>(null);
   const aiSiegeRef = useRef<SiegeThreat[]>([]);
-  const aiHastePendingRef = useRef(false);
 
   const aiSymbol = playerSymbol === 'X' ? 'O' : 'X';
   const doctrine = draft?.doctrine ?? null;
@@ -224,40 +224,22 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       return;
     }
 
-    // AI flanking: any board won → AI auto-places bonus piece
-    if (aiDoctrine === 'flanking' && newlyWon.length > 0 && !engine.winner && !engine.drawn) {
-      const moves = availableMoves(engine);
-      if (moves.length > 0) {
-        engine.currentPlayer = aiSymbol as Player;
-        engine.zkey ^= engine.zobrist.stmKey();
-        engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-        engine.nextBoardIndex = null;
-        engine.zkey ^= engine.zobrist.nbiKey(null);
-        ai.tt.clear(); // TT is stale after manual state changes
-        const bonusMove = choose(ai, engine);
-        const prevW2 = engine.boards.map(b => b.winner);
-        applyMove(engine, bonusMove[0], bonusMove[1]);
-        const flankLastMove = { player: aiSymbol, boardIndex: bonusMove[0], cellIndex: bonusMove[1] };
-        triggerFlash(newlyWon.map(w => w.i), 'emerald');
-        logEvent(`${aiName}: Flanking!`, 'text-emerald-400');
-        completeAfterAiMoveInner(engine, prevW2, flankLastMove, hastePending);
-        return;
+    // Recompute newly won boards after siege (siege claims can win boards)
+    const allNewlyWon = getNewlyWonBoards(engine, prevWinners);
+
+    // AI arsenal: AI won a board → recharge a random used card
+    if (aiDoctrine === 'arsenal' && allNewlyWon.some(w => w.winner === aiSymbol) && !engine.winner && !engine.drawn) {
+      const aPU = aiPURef.current;
+      if (aPU) {
+        const recharged = rechargeRandomCard(aPU);
+        if (recharged) { logEvent(`${aiName}: Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setAiPUDisplay({ ...aPU }); }
       }
     }
 
-    // Player flanking: any board won after AI move → player bonus piece
-    if (doctrine === 'flanking' && newlyWon.length > 0 && !engine.winner && !engine.drawn) {
-      if (hastePending) aiHastePendingRef.current = true;
-      engine.currentPlayer = playerSymbol as Player;
-      engine.zkey ^= engine.zobrist.stmKey();
-      engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-      engine.nextBoardIndex = null;
-      engine.zkey ^= engine.zobrist.nbiKey(null);
-      setTurnPhase('flanking-bonus');
-      setGame(toGameState(engine, lastMove));
-      triggerFlash(newlyWon.map(w => w.i), 'emerald');
-      setAiThinking(false);
-      return;
+    // Player arsenal: player won a board during AI's turn (e.g. via siege) → recharge
+    if (doctrine === 'arsenal' && allNewlyWon.some(w => w.winner === playerSymbol) && !engine.winner && !engine.drawn && playerPU) {
+      const recharged = rechargeRandomCard(playerPU);
+      if (recharged) { logEvent(`Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setPlayerPU({ ...playerPU }); }
     }
 
     // AI haste second turn
@@ -288,7 +270,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     setGame(toGameState(engine, lastMove));
     setAiThinking(false);
     setCardUsedThisTurn(false);
-  }, [aiSymbol, aiName, aiDoctrine, doctrine, playerSymbol, triggerFlash, logEvent, updateSiege]);
+  }, [aiSymbol, aiName, aiDoctrine, doctrine, playerSymbol, playerPU, triggerFlash, logEvent, updateSiege]);
 
   // ---- Execute full AI turn (with card support) ----
 
@@ -407,26 +389,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     completeAfterAiMove(engine, prevWinners, lastMove, hastePending);
   }, [aiSymbol, completeAfterAiMove]);
 
-  // ---- Resumable AI turn (for haste second after player flanking) ----
-
-  const resumeAiTurn = useCallback(() => {
-    const engine = engineRef.current;
-    const ai = aiRef.current;
-    if (!engine || !ai || engine.winner || engine.drawn) return;
-
-    setAiThinking(true);
-    setTimeout(() => {
-      try {
-        ai.tt.clear(); // TT is stale after manual state changes
-        const move = choose(ai, engine);
-        const prevW = engine.boards.map(b => b.winner);
-        applyMove(engine, move[0], move[1]);
-        const lastMove = { player: aiSymbol, boardIndex: move[0], cellIndex: move[1] };
-        completeAfterAiMove(engine, prevW, lastMove, false);
-      } catch (e) { console.error('AI resume error:', e); setAiThinking(false); }
-    }, 800);
-  }, [aiSymbol, completeAfterAiMove]);
-
   // ---- Check passives after player's full turn, before AI responds ----
 
   const afterPlayerTurn = useCallback((
@@ -477,35 +439,22 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       return;
     }
 
-    // AI flanking: player won a board → AI gets bonus piece
-    if (aiDoctrine === 'flanking' && newlyWon.length > 0 && !engine.winner && !engine.drawn) {
-      const ai = aiRef.current!;
-      engine.currentPlayer = aiSymbol as Player;
-      engine.zkey ^= engine.zobrist.stmKey();
-      engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-      engine.nextBoardIndex = null;
-      engine.zkey ^= engine.zobrist.nbiKey(null);
-      const bonusMove = choose(ai, engine);
-      applyMove(engine, bonusMove[0], bonusMove[1]);
-      triggerFlash(newlyWon.map(w => w.i), 'emerald');
-      logEvent(`${aiName}: Flanking!`, 'text-emerald-400');
-      // Continue — the flanking bonus might have changed state
-      // Recurse afterPlayerTurn to check for more passives
-      afterPlayerTurn(engine, lastMove, engine.boards.map(b => b.winner));
-      return;
+    // Recompute newly won boards after siege (siege claims can win boards)
+    const allNewlyWon = getNewlyWonBoards(engine, prevWinners);
+
+    // AI arsenal: AI won a board after player's turn (e.g. siege) → recharge
+    if (aiDoctrine === 'arsenal' && allNewlyWon.some(w => w.winner === aiSymbol) && !engine.winner && !engine.drawn) {
+      const aPU = aiPURef.current;
+      if (aPU) {
+        const recharged = rechargeRandomCard(aPU);
+        if (recharged) { logEvent(`${aiName}: Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setAiPUDisplay({ ...aPU }); }
+      }
     }
 
-    // Player flanking: any board won → bonus piece anywhere
-    if (doctrine === 'flanking' && newlyWon.length > 0 && !engine.winner && !engine.drawn) {
-      engine.currentPlayer = playerSymbol as Player;
-      engine.zkey ^= engine.zobrist.stmKey();
-      engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-      engine.nextBoardIndex = null;
-      engine.zkey ^= engine.zobrist.nbiKey(null);
-      setTurnPhase('flanking-bonus');
-      setGame(toGameState(engine, lastMove));
-      triggerFlash(newlyWon.map(w => w.i), 'emerald');
-      return;
+    // Player arsenal: player won a board → recharge a random used card
+    if (doctrine === 'arsenal' && allNewlyWon.some(w => w.winner === playerSymbol) && !engine.winner && !engine.drawn && playerPU) {
+      const recharged = rechargeRandomCard(playerPU);
+      if (recharged) { logEvent(`Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setPlayerPU({ ...playerPU }); }
     }
 
     // Deferred haste: resume haste second turn after passives resolved
@@ -520,7 +469,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
 
     setGame(toGameState(engine, lastMove));
     doAiResponse();
-  }, [playerSymbol, aiSymbol, aiName, doctrine, aiDoctrine, doAiResponse, triggerFlash, logEvent, updateSiege]);
+  }, [playerSymbol, aiSymbol, aiName, doctrine, aiDoctrine, playerPU, doAiResponse, triggerFlash, logEvent, updateSiege]);
 
   // ---- Start new game ----
 
@@ -549,7 +498,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       const aPU = createPowerUpState(aDraft);
       aiPURef.current = aPU;
       aiSiegeRef.current = [];
-      aiHastePendingRef.current = false;
       setAiPUDisplay({ ...aPU });
     } else {
       aiDraftRef.current = null;
@@ -678,28 +626,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         return;
       }
 
-      // --- Flanking-bonus phase ---
-      if (turnPhase === 'flanking-bonus') {
-        if (aiThinking) return;
-        const legal = availableMoves(engine).some(([b, c]) => b === boardIndex && c === cellIndex);
-        if (!legal) return;
-        const prevWinners = engine.boards.map(b => b.winner);
-        applyMove(engine, boardIndex, cellIndex);
-        const lastMove = { player: playerSymbol, boardIndex, cellIndex };
-        setTurnPhase('normal');
-
-        // If AI has a pending haste second turn, resume it
-        if (aiHastePendingRef.current) {
-          aiHastePendingRef.current = false;
-          setGame(toGameState(engine, lastMove));
-          resumeAiTurn();
-          return;
-        }
-
-        afterPlayerTurn(engine, lastMove, prevWinners);
-        return;
-      }
-
       // --- Momentum-bonus phase ---
       if (turnPhase === 'momentum-bonus') {
         if (aiThinking) return;
@@ -783,7 +709,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       setActivatingCard(null);
       afterPlayerTurn(engine, lastMove, prevWinners);
     },
-    [activatingCard, turnPhase, aiThinking, playerSymbol, commitCard, refreshGame, doAiResponse, afterPlayerTurn, resumeAiTurn, triggerFlash, logEvent, recallSource]
+    [activatingCard, turnPhase, aiThinking, playerSymbol, commitCard, refreshGame, doAiResponse, afterPlayerTurn, triggerFlash, logEvent, recallSource]
   );
 
   // --- Compute targeting info ---
@@ -874,9 +800,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
           ? { label: 'Redirect', desc: 'Click a board to send your opponent there' }
           : turnPhase === 'momentum-bonus'
             ? { label: 'Momentum', desc: 'You won a board — take a bonus turn!' }
-            : turnPhase === 'flanking-bonus'
-              ? { label: 'Flanking', desc: 'A board was won — place a bonus piece anywhere' }
-              : activatingCard === 'recall' && !recallSource
+            : activatingCard === 'recall' && !recallSource
                 ? { label: 'Recall', desc: 'Click one of your pieces to pick it up' }
                 : activatingCard === 'recall' && recallSource
                   ? { label: 'Recall', desc: 'Click an empty cell on another board to place it' }

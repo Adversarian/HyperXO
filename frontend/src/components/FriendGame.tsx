@@ -15,6 +15,7 @@ import {
   refreshSiegeThreats,
   advanceSiegeThreats,
   applySiegeClaim,
+  rechargeRandomCard,
 } from '../engine/powerups';
 import {
   createGame as createEngine,
@@ -83,7 +84,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
     prevWinners: (Player | null)[];
     lastMove: { player: string; boardIndex: number; cellIndex: number };
   } | null>(null);
-  const deferredFlankingRef = useRef<{ player: Player; boards: number[] } | null>(null);
   const deferredHasteRef = useRef<Player | null>(null);
   const preCardWinnersRef = useRef<(Player | null)[] | null>(null);
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -161,7 +161,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
     opponentSiegeRef.current = [];
     pendingRef.current = { opponentCard: null, ddStage: 0, hasteStage: 0 };
     redirectPendingRef.current = null;
-    deferredFlankingRef.current = null;
     deferredHasteRef.current = null;
     preCardWinnersRef.current = null;
     setOpponentCardNotice(null);
@@ -266,16 +265,34 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         return;
       }
 
+      // Recompute newly won boards after siege (siege claims can win boards)
+      const allNewlyWon = getNewlyWonBoards(engine, prevWinners);
+      const moverWonAfterSiege = allNewlyWon.some(w => w.winner === mover);
+
+      // Arsenal: recharge a random used card when you win a board
+      if (moverDoc === 'arsenal' && moverWonAfterSiege && !engine.winner && !engine.drawn) {
+        const moverPU = mover === mySymbol ? myPURef.current : opponentPURef.current;
+        if (moverPU) {
+          const recharged = rechargeRandomCard(moverPU);
+          if (recharged) {
+            if (mover === mySymbol) setMyPU({ ...moverPU });
+            else { setOpponentCardNotice(`Arsenal — ${CARD_CATALOG[recharged].name} recharged`); setTimeout(() => setOpponentCardNotice(null), 2500); }
+          }
+        }
+      }
+      if (otherDoc === 'arsenal' && allNewlyWon.some(w => w.winner === other) && !engine.winner && !engine.drawn) {
+        const otherPU = other === mySymbol ? myPURef.current : opponentPURef.current;
+        if (otherPU) {
+          const recharged = rechargeRandomCard(otherPU);
+          if (recharged) {
+            if (other === mySymbol) setMyPU({ ...otherPU });
+            else { setOpponentCardNotice(`Arsenal — ${CARD_CATALOG[recharged].name} recharged`); setTimeout(() => setOpponentCardNotice(null), 2500); }
+          }
+        }
+      }
+
       // Momentum: mover gets bonus turn
       if (moverDoc === 'momentum' && moverWonBoard) {
-        // Defer non-mover's flanking if they have it (will fire after momentum chain ends)
-        if (otherDoc === 'flanking' && newlyWon.length > 0) {
-          const existing = deferredFlankingRef.current;
-          const boards = existing
-            ? [...existing.boards, ...newlyWon.map(w => w.i)]
-            : newlyWon.map(w => w.i);
-          deferredFlankingRef.current = { player: other, boards };
-        }
         engine.currentPlayer = mover;
         engine.zkey ^= engine.zobrist.stmKey();
         if (mover === mySymbol) {
@@ -285,61 +302,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
             newlyWon.filter(w => w.winner === mover).map(w => w.i),
             mover === 'X' ? 'cyan' : 'rose',
           );
-        }
-        setGame(toGameState(engine, lastMove));
-        return;
-      }
-
-      // Deferred flanking (from a momentum chain that just ended)
-      const deferred = deferredFlankingRef.current;
-      if (deferred) {
-        deferredFlankingRef.current = null;
-        if (engine.currentPlayer !== deferred.player) {
-          engine.currentPlayer = deferred.player;
-          engine.zkey ^= engine.zobrist.stmKey();
-        }
-        engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-        engine.nextBoardIndex = null;
-        engine.zkey ^= engine.zobrist.nbiKey(null);
-        if (deferred.player === mySymbol) {
-          setTurnPhase('flanking-bonus');
-          turnPhaseRef.current = 'flanking-bonus';
-          triggerFlash(deferred.boards, 'emerald');
-        }
-        setGame(toGameState(engine, lastMove));
-        return;
-      }
-
-      // Flanking: non-mover gets bonus piece
-      if (otherDoc === 'flanking' && newlyWon.length > 0) {
-        // Defer mover's flanking if they also have it (will fire after non-mover's bonus)
-        if (moverDoc === 'flanking') {
-          deferredFlankingRef.current = { player: mover, boards: newlyWon.map(w => w.i) };
-        }
-        // engine.currentPlayer is already `other` after applyMove — just free the board
-        engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-        engine.nextBoardIndex = null;
-        engine.zkey ^= engine.zobrist.nbiKey(null);
-        if (other === mySymbol) {
-          setTurnPhase('flanking-bonus');
-          turnPhaseRef.current = 'flanking-bonus';
-          triggerFlash(newlyWon.map(w => w.i), 'emerald');
-        }
-        setGame(toGameState(engine, lastMove));
-        return;
-      }
-
-      // Mover's flanking (they won a board on their own turn, non-mover doesn't have flanking)
-      if (moverDoc === 'flanking' && newlyWon.length > 0) {
-        engine.currentPlayer = mover;
-        engine.zkey ^= engine.zobrist.stmKey();
-        engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-        engine.nextBoardIndex = null;
-        engine.zkey ^= engine.zobrist.nbiKey(null);
-        if (mover === mySymbol) {
-          setTurnPhase('flanking-bonus');
-          turnPhaseRef.current = 'flanking-bonus';
-          triggerFlash(newlyWon.map(w => w.i), 'emerald');
         }
         setGame(toGameState(engine, lastMove));
         return;
@@ -504,20 +466,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         return;
       }
 
-      // --- Flanking-bonus phase ---
-      if (turnPhaseRef.current === 'flanking-bonus') {
-        const legal = availableMoves(engine).some(([b, c]) => b === boardIndex && c === cellIndex);
-        if (!legal) return;
-        const prevWinners = engine.boards.map(b => b.winner);
-        engineApply(engine, boardIndex, cellIndex);
-        const lastMove = { player: mySymbol, boardIndex, cellIndex };
-        ws.send(JSON.stringify({ type: 'move', boardIndex, cellIndex }));
-        setTurnPhase('normal');
-        turnPhaseRef.current = 'normal';
-        checkPassives(engine, mySymbol as Player, prevWinners, lastMove);
-        return;
-      }
-
       // --- Momentum-bonus phase ---
       if (turnPhaseRef.current === 'momentum-bonus') {
         const legal = availableMoves(engine).some(([b, c]) => b === boardIndex && c === cellIndex);
@@ -595,7 +543,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       }
 
       if (pendingFlowCard === 'haste' && !engine.winner && !engine.drawn) {
-        // Defer haste second turn — run passives first (flanking/siege may trigger)
+        // Defer haste second turn — run passives first (arsenal/siege may trigger)
         deferredHasteRef.current = mySymbol as Player;
         checkPassives(engine, mySymbol as Player, prevWinners, lastMove);
         return;
@@ -969,9 +917,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
           ? { label: 'Redirect', desc: 'Click a board to send your opponent there' }
           : turnPhase === 'momentum-bonus'
             ? { label: 'Momentum', desc: 'You won a board — take a bonus turn!' }
-            : turnPhase === 'flanking-bonus'
-              ? { label: 'Flanking', desc: 'A board was won — place a bonus piece anywhere' }
-              : activatingCard === 'recall' && !recallSource
+            : activatingCard === 'recall' && !recallSource
                 ? { label: 'Recall', desc: 'Click one of your pieces to pick it up' }
                 : activatingCard === 'recall' && recallSource
                   ? { label: 'Recall', desc: 'Click an empty cell on another board to place it' }
