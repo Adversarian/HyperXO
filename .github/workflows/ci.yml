@@ -84,4 +84,4 @@ jobs:
         run: |
           mkdir -p ../dist
           echo '<html></html>' > ../dist/index.html
-          cargo build --release 2>&1 || true
+          cargo build --release --target ${{ matrix.target }} 2>&1 || true
