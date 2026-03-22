@@ -8,11 +8,13 @@ interface Props {
   availableCells: Set<number>;
   lastMove?: { boardIndex: number; cellIndex: number };
   onCellClick: (boardIndex: number, cellIndex: number) => void;
+  onCellHover?: (cellIndex: number | null) => void;
   disabled: boolean;
   targetMode?: 'board' | 'opponent-cell' | null;
   opponentSymbol?: string;
   flashColor?: string | null;
   siegeCells?: Set<number>;
+  isHoverTarget?: boolean;
 }
 
 const FLASH_CLASSES: Record<string, string> = {
@@ -49,11 +51,13 @@ export default function SmallBoard({
   availableCells,
   lastMove,
   onCellClick,
+  onCellHover,
   disabled,
   targetMode,
   opponentSymbol,
   flashColor,
   siegeCells,
+  isHoverTarget,
 }: Props) {
   const resolved = board.winner || board.drawn || board.condemned;
   const winLine = board.winner ? getWinLine(board.cells, board.winner) : null;
@@ -70,7 +74,9 @@ export default function SmallBoard({
       ? 'bg-amber-500/10 ring-2 ring-amber-400/70 shadow-lg shadow-amber-500/20'
       : isActive && !disabled
         ? 'bg-indigo-500/10 ring-2 ring-indigo-400 shadow-lg shadow-indigo-500/20'
-        : 'bg-zinc-600/40';
+        : isHoverTarget
+          ? 'bg-zinc-600/40 outline outline-2 outline-dashed outline-zinc-400/50'
+          : 'bg-zinc-600/40';
 
   return (
     <div className={`relative grid grid-cols-3 grid-rows-3 gap-0.5 sm:gap-1 rounded-lg sm:rounded-xl p-1 sm:p-1.5 transition-all duration-200 ${bgColor}`}>
@@ -152,6 +158,8 @@ export default function SmallBoard({
               if (isTargetCell) onCellClick(bigIndex, cellIdx);
               else if (playable) onCellClick(bigIndex, cellIdx);
             }}
+            onMouseEnter={playable && onCellHover ? () => onCellHover(cellIdx) : undefined}
+            onMouseLeave={onCellHover ? () => onCellHover(null) : undefined}
             className={`
               relative flex w-full min-w-7 sm:min-w-12 aspect-square items-center justify-center rounded text-sm font-bold transition-all duration-150
               sm:text-xl sm:rounded-md

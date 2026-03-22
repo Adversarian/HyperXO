@@ -57,18 +57,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sync version from tag
-        shell: bash
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          # Portable in-place sed (works on macOS BSD sed + GNU sed + Windows Git Bash)
-          replace() { sed "s/$1/$2/" "$3" > "$3.tmp" && mv "$3.tmp" "$3"; }
-          replace '"version": ".*"' "\"version\": \"$VERSION\"" frontend/src-tauri/tauri.conf.json
-          replace '^version = ".*"' "version = \"$VERSION\"" frontend/src-tauri/Cargo.toml
-          replace '"version": ".*"' "\"version\": \"$VERSION\"" frontend/package.json
-          echo "Synced version to $VERSION"
-
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
@@ -85,6 +73,18 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: frontend/src-tauri -> target
+
+      - name: Sync version from tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          # Portable in-place sed (works on macOS BSD sed + GNU sed + Windows Git Bash)
+          replace() { sed "s/$1/$2/" "$3" > "$3.tmp" && mv "$3.tmp" "$3"; }
+          replace '"version": ".*"' "\"version\": \"$VERSION\"" frontend/src-tauri/tauri.conf.json
+          replace '^version = ".*"' "version = \"$VERSION\"" frontend/src-tauri/Cargo.toml
+          replace '"version": ".*"' "\"version\": \"$VERSION\"" frontend/package.json
+          echo "Synced version to $VERSION"
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
