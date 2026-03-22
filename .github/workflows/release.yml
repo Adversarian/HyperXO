@@ -69,12 +69,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Cache Rust build artifacts
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: frontend/src-tauri -> target
-          shared-key: release-${{ matrix.target }}
-
       - name: Sync version from tag
         shell: bash
         run: |
@@ -83,9 +77,14 @@ jobs:
           # Portable in-place sed (works on macOS BSD sed + GNU sed + Windows Git Bash)
           replace() { sed "s/$1/$2/" "$3" > "$3.tmp" && mv "$3.tmp" "$3"; }
           replace '"version": ".*"' "\"version\": \"$VERSION\"" frontend/src-tauri/tauri.conf.json
-          replace '^version = ".*"' "version = \"$VERSION\"" frontend/src-tauri/Cargo.toml
           replace '"version": ".*"' "\"version\": \"$VERSION\"" frontend/package.json
           echo "Synced version to $VERSION"
+
+      - name: Cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri -> target
+          shared-key: release-${{ matrix.target }}
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
