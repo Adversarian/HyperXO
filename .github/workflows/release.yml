@@ -85,6 +85,7 @@ jobs:
         with:
           workspaces: frontend/src-tauri -> target
           shared-key: release-${{ matrix.target }}
+          add-job-id-key: false
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
