@@ -50,7 +50,7 @@ Total possible loadouts: 3 x 3 x 3 x 3 = **81**.
 |------|--------|
 | **Momentum** | Whenever you win a small board, immediately take an extra turn before your opponent plays. |
 | **Siege** | Track your 2-in-a-row threats on each small board. If a threat goes unchallenged (opponent does not place in the blocking cell) for 3 consecutive turns, you automatically claim the 3rd cell and the board is checked for a win. |
-| **Arsenal** | Whenever you win a board, a random used active card is recharged (becomes available again). |
+| **Arsenal** | Whenever you win a board, a random used active card is recharged — but not the card you played this turn. |
 
 ## Balance notes
 

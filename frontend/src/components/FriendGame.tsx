@@ -55,7 +55,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
   // ===== Gambit state =====
   const [myPU, setMyPU] = useState<PowerUpState | null>(null);
   const [activatingCard, setActivatingCard] = useState<ActiveCard | null>(null);
-  const [cardUsedThisTurn, setCardUsedThisTurn] = useState(false);
+  const [cardUsedThisTurn, setCardUsedThisTurn] = useState<ActiveCard | null>(null);
   const [turnPhase, setTurnPhase] = useState<TurnPhase>('normal');
   const [flashBoards, setFlashBoards] = useState<Map<number, string>>(new Map());
   const [opponentCardNotice, setOpponentCardNotice] = useState<string | null>(null);
@@ -85,6 +85,8 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
     lastMove: { player: string; boardIndex: number; cellIndex: number };
   } | null>(null);
   const deferredHasteRef = useRef<Player | null>(null);
+  const cardUsedThisTurnRef = useRef<ActiveCard | null>(null);
+  const opponentCardThisTurnRef = useRef<ActiveCard | null>(null);
   const preCardWinnersRef = useRef<(Player | null)[] | null>(null);
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -153,7 +155,9 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       opponentPURef.current = null;
     }
     setActivatingCard(null);
-    setCardUsedThisTurn(false);
+    setCardUsedThisTurn(null);
+    cardUsedThisTurnRef.current = null;
+    opponentCardThisTurnRef.current = null;
     setRecallSource(null);
     setTurnPhase('normal');
     turnPhaseRef.current = 'normal';
@@ -269,11 +273,12 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       const allNewlyWon = getNewlyWonBoards(engine, prevWinners);
       const moverWonAfterSiege = allNewlyWon.some(w => w.winner === mover);
 
-      // Arsenal: recharge a random used card when you win a board
+      // Arsenal: recharge a random used card when you win a board (exclude card used this turn)
       if (moverDoc === 'arsenal' && moverWonAfterSiege && !engine.winner && !engine.drawn) {
         const moverPU = mover === mySymbol ? myPURef.current : opponentPURef.current;
+        const moverExclude = mover === mySymbol ? cardUsedThisTurnRef.current : opponentCardThisTurnRef.current;
         if (moverPU) {
-          const recharged = rechargeRandomCard(moverPU);
+          const recharged = rechargeRandomCard(moverPU, moverExclude ?? undefined);
           if (recharged) {
             if (mover === mySymbol) setMyPU({ ...moverPU });
             else { setOpponentCardNotice(`Arsenal — ${CARD_CATALOG[recharged].name} recharged`); setTimeout(() => setOpponentCardNotice(null), 2500); }
@@ -282,8 +287,9 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       }
       if (otherDoc === 'arsenal' && allNewlyWon.some(w => w.winner === other) && !engine.winner && !engine.drawn) {
         const otherPU = other === mySymbol ? myPURef.current : opponentPURef.current;
+        const otherExclude = other === mySymbol ? cardUsedThisTurnRef.current : opponentCardThisTurnRef.current;
         if (otherPU) {
-          const recharged = rechargeRandomCard(otherPU);
+          const recharged = rechargeRandomCard(otherPU, otherExclude ?? undefined);
           if (recharged) {
             if (other === mySymbol) setMyPU({ ...otherPU });
             else { setOpponentCardNotice(`Arsenal — ${CARD_CATALOG[recharged].name} recharged`); setTimeout(() => setOpponentCardNotice(null), 2500); }
@@ -326,7 +332,13 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
 
       setGame(toGameState(engine, lastMove));
       // Reset card usage for whoever's turn it now is
-      if (engine.currentPlayer === mySymbol) setCardUsedThisTurn(false);
+      if (engine.currentPlayer === mySymbol) {
+        setCardUsedThisTurn(null);
+        cardUsedThisTurnRef.current = null;
+      }
+      if (engine.currentPlayer !== mySymbol) {
+        opponentCardThisTurnRef.current = null;
+      }
     },
     [mySymbol, getDoctrineOf, triggerFlash, updateMySiege],
   );
@@ -339,7 +351,8 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       markCardUsed(myPURef.current, card);
       setMyPU({ ...myPURef.current });
       setActivatingCard(null);
-      setCardUsedThisTurn(true);
+      setCardUsedThisTurn(card);
+      cardUsedThisTurnRef.current = card;
     },
     [],
   );
@@ -645,6 +658,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
 
         // Mark card as used in opponent's state
         if (opponentPURef.current) markCardUsed(opponentPURef.current, card);
+        opponentCardThisTurnRef.current = card;
 
         // Show notice
         if (!['double-down', 'haste', 'redirect'].includes(card)) {
@@ -1004,7 +1018,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
             state={myPU}
             onActivate={handleActivateCard}
             activatingCard={activatingCard}
-            disabled={!isMyTurn || turnPhase !== 'normal' || cardUsedThisTurn}
+            disabled={!isMyTurn || turnPhase !== 'normal' || !!cardUsedThisTurn}
           />
           {activatingCard && (
             <button

@@ -88,7 +88,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   const [aiThinking, setAiThinking] = useState(false);
   const [playerPU, setPlayerPU] = useState<PowerUpState | null>(null);
   const [activatingCard, setActivatingCard] = useState<ActiveCard | null>(null);
-  const [cardUsedThisTurn, setCardUsedThisTurn] = useState(false);
+  const [cardUsedThisTurn, setCardUsedThisTurn] = useState<ActiveCard | null>(null);
   const [turnPhase, setTurnPhase] = useState<TurnPhase>('normal');
   const [siegeThreats, setSiegeThreats] = useState<SiegeThreat[]>([]);
   const [flashBoards, setFlashBoards] = useState<Map<number, string>>(new Map());
@@ -107,6 +107,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   const aiDraftRef = useRef<PowerUpDraft | null>(null);
   const aiPURef = useRef<PowerUpState | null>(null);
   const aiSiegeRef = useRef<SiegeThreat[]>([]);
+  const aiCardThisTurnRef = useRef<ActiveCard | null>(null);
 
   const aiSymbol = playerSymbol === 'X' ? 'O' : 'X';
   const doctrine = draft?.doctrine ?? null;
@@ -227,18 +228,18 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     // Recompute newly won boards after siege (siege claims can win boards)
     const allNewlyWon = getNewlyWonBoards(engine, prevWinners);
 
-    // AI arsenal: AI won a board → recharge a random used card
+    // AI arsenal: AI won a board → recharge a random used card (exclude card used this turn)
     if (aiDoctrine === 'arsenal' && allNewlyWon.some(w => w.winner === aiSymbol) && !engine.winner && !engine.drawn) {
       const aPU = aiPURef.current;
       if (aPU) {
-        const recharged = rechargeRandomCard(aPU);
+        const recharged = rechargeRandomCard(aPU, aiCardThisTurnRef.current ?? undefined);
         if (recharged) { logEvent(`${aiName}: Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setAiPUDisplay({ ...aPU }); }
       }
     }
 
     // Player arsenal: player won a board during AI's turn (e.g. via siege) → recharge
     if (doctrine === 'arsenal' && allNewlyWon.some(w => w.winner === playerSymbol) && !engine.winner && !engine.drawn && playerPU) {
-      const recharged = rechargeRandomCard(playerPU);
+      const recharged = rechargeRandomCard(playerPU, cardUsedThisTurn ?? undefined);
       if (recharged) { logEvent(`Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setPlayerPU({ ...playerPU }); }
     }
 
@@ -269,8 +270,8 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     // Normal: player's turn
     setGame(toGameState(engine, lastMove));
     setAiThinking(false);
-    setCardUsedThisTurn(false);
-  }, [aiSymbol, aiName, aiDoctrine, doctrine, playerSymbol, playerPU, triggerFlash, logEvent, updateSiege]);
+    setCardUsedThisTurn(null);
+  }, [aiSymbol, aiName, aiDoctrine, doctrine, playerSymbol, playerPU, cardUsedThisTurn, triggerFlash, logEvent, updateSiege]);
 
   // ---- Execute full AI turn (with card support) ----
 
@@ -281,6 +282,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
 
     syncCardContext();
     setAiThinking(true);
+    aiCardThisTurnRef.current = null;
 
     const aiPU = aiPURef.current;
     const depthLevel = DIFFICULTY_PRESETS[difficulty].depth;
@@ -305,6 +307,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         }
         if (cardDecision) {
           markCardUsed(aiPU!, cardDecision.card);
+          aiCardThisTurnRef.current = cardDecision.card;
           setAiPUDisplay({ ...aiPU! });
 
           const flashB = getCardFlashBoards(cardDecision);
@@ -330,6 +333,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         // Flow modifier: mark for later
         flowCard = cardDecision.card;
         markCardUsed(aiPU!, cardDecision.card);
+        aiCardThisTurnRef.current = cardDecision.card;
         setAiPUDisplay({ ...aiPU! });
         logEvent(`${aiName} used ${CARD_CATALOG[cardDecision.card].name}!`, 'text-indigo-400');
       }
@@ -442,18 +446,18 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     // Recompute newly won boards after siege (siege claims can win boards)
     const allNewlyWon = getNewlyWonBoards(engine, prevWinners);
 
-    // AI arsenal: AI won a board after player's turn (e.g. siege) → recharge
+    // AI arsenal: AI won a board after player's turn (e.g. siege) → recharge (exclude card AI used last)
     if (aiDoctrine === 'arsenal' && allNewlyWon.some(w => w.winner === aiSymbol) && !engine.winner && !engine.drawn) {
       const aPU = aiPURef.current;
       if (aPU) {
-        const recharged = rechargeRandomCard(aPU);
+        const recharged = rechargeRandomCard(aPU, aiCardThisTurnRef.current ?? undefined);
         if (recharged) { logEvent(`${aiName}: Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setAiPUDisplay({ ...aPU }); }
       }
     }
 
-    // Player arsenal: player won a board → recharge a random used card
+    // Player arsenal: player won a board → recharge a random used card (exclude card used this turn)
     if (doctrine === 'arsenal' && allNewlyWon.some(w => w.winner === playerSymbol) && !engine.winner && !engine.drawn && playerPU) {
-      const recharged = rechargeRandomCard(playerPU);
+      const recharged = rechargeRandomCard(playerPU, cardUsedThisTurn ?? undefined);
       if (recharged) { logEvent(`Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setPlayerPU({ ...playerPU }); }
     }
 
@@ -469,7 +473,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
 
     setGame(toGameState(engine, lastMove));
     doAiResponse();
-  }, [playerSymbol, aiSymbol, aiName, doctrine, aiDoctrine, playerPU, doAiResponse, triggerFlash, logEvent, updateSiege]);
+  }, [playerSymbol, aiSymbol, aiName, doctrine, aiDoctrine, playerPU, cardUsedThisTurn, doAiResponse, triggerFlash, logEvent, updateSiege]);
 
   // ---- Start new game ----
 
@@ -481,7 +485,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     aiRef.current = ai;
     setPlayerPU(draft ? createPowerUpState(draft) : null);
     setActivatingCard(null);
-    setCardUsedThisTurn(false);
+    setCardUsedThisTurn(null);
     setRecallSource(null);
     setTurnPhase('normal');
     updateSiege([]);
@@ -524,7 +528,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     markCardUsed(playerPU, card);
     setPlayerPU({ ...playerPU });
     setActivatingCard(null);
-    setCardUsedThisTurn(true);
+    setCardUsedThisTurn(card);
   }, [playerPU]);
 
   const handleActivateCard = useCallback((card: ActiveCard) => {
@@ -887,7 +891,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
                 state={playerPU}
                 onActivate={handleActivateCard}
                 activatingCard={activatingCard}
-                disabled={!isPlayerTurn || turnPhase !== 'normal' || cardUsedThisTurn}
+                disabled={!isPlayerTurn || turnPhase !== 'normal' || !!cardUsedThisTurn}
                 vertical
               />
             </div>
@@ -896,7 +900,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
                 state={playerPU}
                 onActivate={handleActivateCard}
                 activatingCard={activatingCard}
-                disabled={!isPlayerTurn || turnPhase !== 'normal' || cardUsedThisTurn}
+                disabled={!isPlayerTurn || turnPhase !== 'normal' || !!cardUsedThisTurn}
               />
             </div>
             {activatingCard && (

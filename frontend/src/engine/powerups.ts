@@ -139,7 +139,7 @@ export const CARD_CATALOG: Record<PowerUpCard, CardDef> = {
     id: 'arsenal',
     name: 'Arsenal',
     category: 'doctrine',
-    description: 'When you win a board, recharge a random used card.',
+    description: 'When you win a board, recharge a random used card (not the one played this turn).',
     flavor: 'Resupply',
     passive: true,
     targetType: 'none',
@@ -463,9 +463,10 @@ export function applySiegeClaim(game: HyperXOGame, boardIdx: number, cellIdx: nu
 
 // ---- Arsenal passive helper ----
 
-/** Recharge a random used active card. Returns the recharged card name or null. */
-export function rechargeRandomCard(state: PowerUpState): ActiveCard | null {
-  const usedCards = getActiveCards(state.draft).filter(c => isCardUsed(state, c));
+/** Recharge a random used active card (excluding a specific card, e.g. the one just played).
+ *  Returns the recharged card name or null. */
+export function rechargeRandomCard(state: PowerUpState, exclude?: ActiveCard): ActiveCard | null {
+  const usedCards = getActiveCards(state.draft).filter(c => isCardUsed(state, c) && c !== exclude);
   if (usedCards.length === 0) return null;
   const pick = usedCards[Math.floor(Math.random() * usedCards.length)];
   state.used[pick] = false;

@@ -215,7 +215,9 @@ function executeAiTurn(game: HyperXOGame, player: SimPlayer, opponent: SimPlayer
     if (game.winner || game.drawn) break;
     const wonByMe = newlyWon.some(w => w.winner === p.ai.player);
     if (!wonByMe) continue;
-    const usedCards = getActiveCards(p.puState.draft).filter(c => isCardUsed(p.puState, c));
+    // Exclude the card used this turn (prevent instant recharge loop)
+    const exclude = (p === player && result.cardUsed) ? result.cardUsed.card : undefined;
+    const usedCards = getActiveCards(p.puState.draft).filter(c => isCardUsed(p.puState, c) && c !== exclude);
     if (usedCards.length > 0) {
       const pick = usedCards[Math.floor(Math.random() * usedCards.length)];
       p.puState.used[pick] = false;
@@ -839,6 +841,25 @@ describe('Passive trigger chains', () => {
     const pu = createPowerUpState({ strike: 'haste', tactics: 'condemn', disruption: 'sabotage', doctrine: 'arsenal' });
     const recharged = rechargeRandomCard(pu);
     expect(recharged).toBeNull();
+  });
+
+  it('arsenal excludes the card used this turn', () => {
+    const pu = createPowerUpState({ strike: 'haste', tactics: 'condemn', disruption: 'sabotage', doctrine: 'arsenal' });
+    useCard(pu, 'haste');
+    // Exclude haste — only haste is used, so nothing to recharge
+    const recharged = rechargeRandomCard(pu, 'haste');
+    expect(recharged).toBeNull();
+  });
+
+  it('arsenal recharges a different card when exclude is set', () => {
+    const pu = createPowerUpState({ strike: 'haste', tactics: 'condemn', disruption: 'sabotage', doctrine: 'arsenal' });
+    useCard(pu, 'haste');
+    useCard(pu, 'condemn');
+    // Exclude haste — should recharge condemn
+    const recharged = rechargeRandomCard(pu, 'haste');
+    expect(recharged).toBe('condemn');
+    expect(isCardUsed(pu, 'condemn')).toBe(false);
+    expect(isCardUsed(pu, 'haste')).toBe(true); // haste stays used
   });
 });
 
