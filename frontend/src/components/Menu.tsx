@@ -1,114 +1,32 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Difficulty, GameMode } from '../types';
 
-type RulesTab = 'general' | 'classic' | 'sudden-death' | 'misere' | 'conquest';
+type RulesTab = 'general' | 'modes' | 'gambits';
 
 const RULES_TABS: { value: RulesTab; label: string }[] = [
   { value: 'general', label: 'General' },
-  { value: 'classic', label: 'Classic' },
-  { value: 'sudden-death', label: 'Sudden Death' },
-  { value: 'misere', label: 'Misère' },
-  { value: 'conquest', label: 'Conquest' },
+  { value: 'modes', label: 'Game Modes' },
+  { value: 'gambits', label: 'Gambits' },
 ];
 
-const RULES_CONTENT: Record<RulesTab, ReactNode> = {
-  general: (
-    <>
-      <ol className="space-y-3 text-sm text-zinc-400 list-decimal list-outside ml-4">
-        <li>
-          The board is a <span className="text-zinc-300">3x3 grid of smaller tic-tac-toe boards</span>.
-        </li>
-        <li>
-          <span className="text-zinc-300">Where you play determines where your opponent must play next.</span>{' '}
-          If you place in the top-right cell of any board, your opponent is sent to the top-right board.
-        </li>
-        <li>
-          The <span className="text-indigo-400">highlighted board</span> shows where you must play.
-          If that board is already won or full, you get a free move anywhere.
-        </li>
-        <li>
-          Win a small board the normal way — get <span className="text-cyan-400">three in a row</span>.
-        </li>
-      </ol>
-      <p className="mt-4 text-xs text-zinc-600">
-        Tip: every move is a tradeoff between strengthening your position and controlling where your opponent plays next.
-      </p>
-      <div className="mt-5 pt-4 border-t border-zinc-800">
-        <h3 className="text-zinc-200 text-sm font-semibold mb-2">Gambits</h3>
-        <p className="text-sm text-zinc-400 mb-2">
-          Enable <span className="text-zinc-300">Gambits</span> to draft tactical cards before the game.
-          Pick one from each of four categories:
-        </p>
-        <ul className="space-y-1 text-xs text-zinc-400 ml-3">
-          <li><span className="text-rose-400 font-medium">Strike</span> — power up your turn (place extra pieces, steal cells, double turns)</li>
-          <li><span className="text-sky-400 font-medium">Tactics</span> — control the flow (redirect opponent, play anywhere, remove a board)</li>
-          <li><span className="text-violet-400 font-medium">Disruption</span> — alter the board (swap pieces, wipe a board, remove a piece)</li>
-          <li><span className="text-amber-400 font-medium">Doctrine</span> — passive ability active all game (bonus turns on wins, auto-claim threats, bonus pieces)</li>
-        </ul>
-        <p className="text-xs text-zinc-500 mt-2">
-          Active gambits are one-time use. Activate before placing your piece.
-        </p>
-      </div>
-    </>
-  ),
-  classic: (
-    <div className="space-y-3 text-sm text-zinc-400">
-      <p>
-        The standard game mode. Line up <span className="text-zinc-300">three won boards</span> in a row,
-        column, or diagonal on the big grid to win.
-      </p>
-      <p>
-        If every macro line is blocked (contains boards won by both players),
-        the game ends in a <span className="text-zinc-300">draw</span>.
-      </p>
-    </div>
-  ),
-  'sudden-death': (
-    <div className="space-y-3 text-sm text-zinc-400">
-      <p>
-        The first player to win <span className="text-orange-400">any single board</span> wins the entire game.
-        Macro lines don't matter.
-      </p>
-      <p>
-        Every 2-in-a-row threat is lethal. Play aggressively but carefully —
-        one mistake and it's over.
-      </p>
-    </div>
-  ),
-  misere: (
-    <div className="space-y-3 text-sm text-zinc-400">
-      <p>
-        Inverted rules: completing <span className="text-violet-400">three boards in a row</span> on
-        the macro grid means you <span className="text-zinc-300">lose</span>.
-      </p>
-      <p>
-        Force your opponent into wins they don't want. Winning individual boards
-        is fine — just don't complete a macro line.
-      </p>
-    </div>
-  ),
-  conquest: (
-    <div className="space-y-3 text-sm text-zinc-400">
-      <p>
-        A point-based game mode. At the start, <span className="text-amber-400">3 random boards</span> are
-        marked as high-value (<span className="text-amber-400">2 points</span> each). The remaining 6 boards
-        are worth <span className="text-zinc-300">1 point</span> each.
-      </p>
-      <p>
-        Win boards to score points. The <span className="text-zinc-300">player with the most points</span> when
-        all boards are finished wins. Drawn boards are worth 0 points to both players.
-      </p>
-      <p>
-        The game ends early if one player has an <span className="text-zinc-300">insurmountable lead</span> —
-        when the trailing player can't catch up even by winning every remaining board.
-      </p>
-      <p className="text-xs text-zinc-500">
-        Tiebreaker: if scores are equal, the player who captured more high-value boards wins.
-        If still tied, it's a draw.
-      </p>
-    </div>
-  ),
-};
+const MODE_DESCRIPTIONS: { id: string; label: string; color: string; desc: string }[] = [
+  {
+    id: 'classic', label: 'Classic', color: 'text-indigo-400',
+    desc: 'The standard game mode. Line up three won boards in a row, column, or diagonal on the big grid to win. If every macro line is blocked (contains boards won by both players), the game ends in a draw.',
+  },
+  {
+    id: 'sudden-death', label: 'Sudden Death', color: 'text-orange-400',
+    desc: 'The first player to win any single board wins the entire game. Macro lines don\'t matter. Every 2-in-a-row threat is lethal — one mistake and it\'s over.',
+  },
+  {
+    id: 'misere', label: 'Misère', color: 'text-violet-400',
+    desc: 'Inverted rules: completing three boards in a row on the macro grid means you lose. Force your opponent into wins they don\'t want. Winning individual boards is fine — just don\'t complete a macro line.',
+  },
+  {
+    id: 'conquest', label: 'Conquest', color: 'text-amber-400',
+    desc: 'A point-based mode. 3 random boards are marked high-value (2 pts each), the rest are worth 1 pt. Win boards to score points — most points wins. The game ends early if the trailing player can\'t catch up. Tiebreaker: more high-value boards captured.',
+  },
+];
 
 interface Props {
   onStartAI: (difficulty: Difficulty, symbol: 'X' | 'O', aiName: string, mode: GameMode, powerUps: boolean) => void;
@@ -137,6 +55,25 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [rulesVisible, setRulesVisible] = useState(false);
   const [rulesTab, setRulesTab] = useState<RulesTab>('general');
+  const [openMode, setOpenMode] = useState<string | null>(null);
+  const [contentHeight, setContentHeight] = useState<number | undefined>(undefined);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  const measureContent = useCallback(() => {
+    if (contentRef.current) setContentHeight(contentRef.current.scrollHeight);
+  }, []);
+
+  useEffect(() => {
+    measureContent();
+  }, [rulesTab, openMode, measureContent]);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(measureContent);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measureContent]);
 
   const openRules = () => {
     setRulesOpen(true);
@@ -330,22 +267,92 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
                 &times;
               </button>
             </div>
-            <div className="flex gap-1 mb-4 overflow-x-auto pb-1">
+            <div className="flex gap-1 mb-4 border-b border-zinc-800 pb-2">
               {RULES_TABS.map((tab) => (
                 <button
                   key={tab.value}
                   onClick={() => setRulesTab(tab.value)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
                     rulesTab === tab.value
                       ? 'bg-indigo-500 text-white'
-                      : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'
                   }`}
                 >
                   {tab.label}
                 </button>
               ))}
             </div>
-            {RULES_CONTENT[rulesTab]}
+
+            <div
+              className="overflow-hidden transition-[height] duration-200 ease-out"
+              style={{ height: contentHeight !== undefined ? contentHeight : 'auto' }}
+            >
+            <div ref={contentRef} key={rulesTab} className="animate-tab-fade">
+            {rulesTab === 'general' && (
+              <>
+                <ol className="space-y-3 text-sm text-zinc-400 list-decimal list-outside ml-4">
+                  <li>
+                    The board is a <span className="text-zinc-300">3x3 grid of smaller tic-tac-toe boards</span>.
+                  </li>
+                  <li>
+                    <span className="text-zinc-300">Where you play determines where your opponent must play next.</span>{' '}
+                    If you place in the top-right cell of any board, your opponent is sent to the top-right board.
+                  </li>
+                  <li>
+                    The <span className="text-indigo-400">highlighted board</span> shows where you must play.
+                    If that board is already won or full, you get a free move anywhere.
+                  </li>
+                  <li>
+                    Win a small board the normal way — get <span className="text-cyan-400">three in a row</span>.
+                  </li>
+                </ol>
+                <p className="mt-4 text-xs text-zinc-600">
+                  Tip: every move is a tradeoff between strengthening your position and controlling where your opponent plays next.
+                </p>
+              </>
+            )}
+
+            {rulesTab === 'modes' && (
+              <div className="space-y-1.5">
+                {MODE_DESCRIPTIONS.map((m) => (
+                  <div key={m.id}>
+                    <button
+                      onClick={() => setOpenMode(openMode === m.id ? null : m.id)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-zinc-800/60 hover:bg-zinc-800 transition-colors"
+                    >
+                      <span className={`text-sm font-medium ${m.color}`}>{m.label}</span>
+                      <span className={`text-zinc-600 text-xs transition-transform duration-200 ${openMode === m.id ? 'rotate-180' : ''}`}>&#9662;</span>
+                    </button>
+                    <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${openMode === m.id ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                      <div className="overflow-hidden">
+                        <p className="text-sm text-zinc-400 px-3 py-2">{m.desc}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {rulesTab === 'gambits' && (
+              <>
+                <p className="text-sm text-zinc-400 mb-3">
+                  Enable <span className="text-zinc-300">Gambits</span> to draft tactical cards before the game.
+                  Each player bans one card, then picks one from each of four categories:
+                </p>
+                <ul className="space-y-1.5 text-sm text-zinc-400 ml-1">
+                  <li><span className="text-rose-400 font-medium">Strike</span> — power up your turn</li>
+                  <li><span className="text-sky-400 font-medium">Tactics</span> — control the flow</li>
+                  <li><span className="text-violet-400 font-medium">Disruption</span> — alter the board</li>
+                  <li><span className="text-amber-400 font-medium">Doctrine</span> — passive ability active all game</li>
+                </ul>
+                <p className="text-xs text-zinc-500 mt-3">
+                  You get 3 active cards (one-time use) and 1 passive doctrine.
+                  Activate cards before placing your piece.
+                </p>
+              </>
+            )}
+            </div>
+            </div>
           </div>
         </div>
       )}

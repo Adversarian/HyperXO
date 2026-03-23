@@ -50,6 +50,15 @@
   animation: fade-in 200ms ease-out;
 }
 
+@keyframes tab-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.animate-tab-fade {
+  animation: tab-fade 150ms ease-out;
+}
+
 /* Piece placement: pop-in */
 @keyframes piece-pop {
   0%   { transform: scale(0); opacity: 0; }
