@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import type { Difficulty, GameMode } from '../types';
 
 type RulesTab = 'general' | 'modes' | 'gambits';
@@ -56,24 +56,6 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
   const [rulesVisible, setRulesVisible] = useState(false);
   const [rulesTab, setRulesTab] = useState<RulesTab>('general');
   const [openMode, setOpenMode] = useState<string | null>(null);
-  const [contentHeight, setContentHeight] = useState<number | undefined>(undefined);
-  const contentRef = useRef<HTMLDivElement>(null);
-
-  const measureContent = useCallback(() => {
-    if (contentRef.current) setContentHeight(contentRef.current.scrollHeight);
-  }, []);
-
-  useEffect(() => {
-    measureContent();
-  }, [rulesTab, openMode, measureContent]);
-
-  useEffect(() => {
-    const el = contentRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(measureContent);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [measureContent]);
 
   const openRules = () => {
     setRulesOpen(true);
@@ -283,11 +265,7 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
               ))}
             </div>
 
-            <div
-              className="overflow-hidden transition-[height] duration-200 ease-out"
-              style={{ height: contentHeight !== undefined ? contentHeight : 'auto' }}
-            >
-            <div ref={contentRef} key={rulesTab} className="animate-tab-fade">
+            <div key={rulesTab} className="animate-tab-fade">
             {rulesTab === 'general' && (
               <>
                 <ol className="space-y-3 text-sm text-zinc-400 list-decimal list-outside ml-4">
@@ -351,7 +329,6 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
                 </p>
               </>
             )}
-            </div>
             </div>
           </div>
         </div>
