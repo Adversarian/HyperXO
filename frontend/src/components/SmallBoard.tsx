@@ -15,6 +15,7 @@ interface Props {
   flashColor?: string | null;
   siegeCells?: Set<number>;
   isHoverTarget?: boolean;
+  currentPlayer?: string;
 }
 
 const FLASH_CLASSES: Record<string, string> = {
@@ -58,6 +59,7 @@ export default function SmallBoard({
   flashColor,
   siegeCells,
   isHoverTarget,
+  currentPlayer,
 }: Props) {
   const resolved = board.winner || board.drawn || board.condemned;
   const winLine = board.winner ? getWinLine(board.cells, board.winner) : null;
@@ -73,7 +75,9 @@ export default function SmallBoard({
     : targetMode === 'board'
       ? 'bg-amber-500/10 ring-2 ring-amber-400/70 shadow-lg shadow-amber-500/20'
       : isActive && !disabled
-        ? 'bg-indigo-500/10 ring-2 ring-indigo-400 shadow-lg shadow-indigo-500/20'
+        ? isHoverTarget
+          ? 'bg-indigo-500/10 outline outline-2 outline-dashed outline-indigo-400 shadow-lg shadow-indigo-500/20'
+          : 'bg-indigo-500/10 ring-2 ring-indigo-400 shadow-lg shadow-indigo-500/20'
         : isHoverTarget
           ? 'bg-zinc-600/40 outline outline-2 outline-dashed outline-zinc-400/50'
           : 'bg-zinc-600/40';
@@ -161,7 +165,7 @@ export default function SmallBoard({
             onMouseEnter={playable && onCellHover ? () => onCellHover(cellIdx) : undefined}
             onMouseLeave={onCellHover ? () => onCellHover(null) : undefined}
             className={`
-              relative flex w-full min-w-7 sm:min-w-12 aspect-square items-center justify-center rounded text-sm font-bold transition-all duration-150
+              group/cell relative flex w-full min-w-7 sm:min-w-12 aspect-square items-center justify-center rounded text-sm font-bold transition-all duration-150
               sm:text-xl sm:rounded-md
               ${cell === 'X' ? 'text-cyan-400' : cell === 'O' ? 'text-rose-400' : ''}
               ${isLastMove && !targetMode ? 'ring-2 ring-yellow-400/70 bg-yellow-400/10' : ''}
@@ -178,6 +182,12 @@ export default function SmallBoard({
             {cell ? (
               <span className={isLastMove && !targetMode ? 'animate-piece-pop inline-block' : ''}>
                 <Mark mark={cell} />
+              </span>
+            ) : playable && currentPlayer ? (
+              <span className={`opacity-0 group-hover/cell:opacity-30 transition-opacity duration-150 pointer-events-none ${
+                currentPlayer === 'X' ? 'text-cyan-400' : 'text-rose-400'
+              }`}>
+                <Mark mark={currentPlayer} />
               </span>
             ) : null}
             {isSiegeThreat && (

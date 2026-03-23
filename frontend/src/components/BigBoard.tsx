@@ -61,7 +61,8 @@ export default function BigBoard({ game, onCellClick, disabled, targeting, flash
             opponentSymbol={targeting?.opponentSymbol}
             flashColor={flashBoards?.get(board.index)}
             siegeCells={siegeCells?.get(board.index)}
-            isHoverTarget={hoverTarget === board.index && !activeBoards.has(board.index)}
+            isHoverTarget={hoverTarget === board.index}
+            currentPlayer={game.currentPlayer}
           />
         );
       })}
