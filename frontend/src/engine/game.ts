@@ -1,4 +1,4 @@
-export type GameMode = 'classic' | 'sudden-death' | 'misere';
+export type GameMode = 'classic' | 'sudden-death' | 'misere' | 'conquest';
 export type Player = 'X' | 'O';
 export type Cell = 'X' | 'O' | '';
 
@@ -71,10 +71,24 @@ export interface HyperXOGame {
   zobrist: Zobrist;
   zkey: number;
   mode: GameMode;
+  conquestBonusBoards: number[];
 }
 
-export function createGame(mode: GameMode = 'classic'): HyperXOGame {
+export function createGame(mode: GameMode = 'classic', conquestBonusBoards?: number[]): HyperXOGame {
   const zobrist = new Zobrist();
+  let bonus: number[] = [];
+  if (mode === 'conquest') {
+    if (conquestBonusBoards) {
+      bonus = conquestBonusBoards;
+    } else {
+      const indices = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+      for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+      }
+      bonus = indices.slice(0, 3).sort((a, b) => a - b);
+    }
+  }
   const game: HyperXOGame = {
     boards: Array.from({ length: 9 }, () => createSmallBoard()),
     currentPlayer: 'X',
@@ -84,9 +98,25 @@ export function createGame(mode: GameMode = 'classic'): HyperXOGame {
     zobrist,
     zkey: 0,
     mode,
+    conquestBonusBoards: bonus,
   };
   game.zkey ^= zobrist.nbiKey(null);
   return game;
+}
+
+// ---------- Conquest scoring ----------
+
+export function computeConquestScores(game: HyperXOGame): { X: number; O: number } {
+  let X = 0, O = 0;
+  const bonusSet = new Set(game.conquestBonusBoards);
+  for (let i = 0; i < 9; i++) {
+    const winner = game.boards[i].winner;
+    if (!winner) continue;
+    const value = bonusSet.has(i) ? 2 : 1;
+    if (winner === 'X') X += value;
+    else O += value;
+  }
+  return { X, O };
 }
 
 // ---------- Queries ----------
@@ -101,6 +131,50 @@ export function validateWinner(game: HyperXOGame): string | null {
     if (game.winner !== expected) {
       return `sudden-death: expected winner=${expected}, got winner=${game.winner}`;
     }
+    return null;
+  }
+
+  if (game.mode === 'conquest') {
+    const scores = computeConquestScores(game);
+    const bonusSet = new Set(game.conquestBonusBoards);
+    let remainingPoints = 0;
+    for (let i = 0; i < 9; i++) {
+      const b = game.boards[i];
+      if (!b.winner && !b.drawn && !b.condemned) remainingPoints += bonusSet.has(i) ? 2 : 1;
+    }
+    const allFinished = remainingPoints === 0;
+
+    // Check early termination
+    if (scores.X > scores.O + remainingPoints) {
+      if (game.winner !== 'X') return `conquest: X should win by early termination (${scores.X} vs max ${scores.O + remainingPoints})`;
+      return null;
+    }
+    if (scores.O > scores.X + remainingPoints) {
+      if (game.winner !== 'O') return `conquest: O should win by early termination (${scores.O} vs max ${scores.X + remainingPoints})`;
+      return null;
+    }
+
+    if (allFinished || availableMoves(game).length === 0) {
+      if (scores.X > scores.O) {
+        if (game.winner !== 'X') return `conquest: X should win (${scores.X}-${scores.O})`;
+      } else if (scores.O > scores.X) {
+        if (game.winner !== 'O') return `conquest: O should win (${scores.O}-${scores.X})`;
+      } else {
+        const xBonus = game.conquestBonusBoards.filter(i => game.boards[i].winner === 'X').length;
+        const oBonus = game.conquestBonusBoards.filter(i => game.boards[i].winner === 'O').length;
+        if (xBonus > oBonus) {
+          if (game.winner !== 'X') return `conquest: X should win tiebreaker (${xBonus} vs ${oBonus} bonus boards)`;
+        } else if (oBonus > xBonus) {
+          if (game.winner !== 'O') return `conquest: O should win tiebreaker (${oBonus} vs ${xBonus} bonus boards)`;
+        } else {
+          if (!game.drawn) return `conquest: should be draw (${scores.X}-${scores.O}, equal bonus boards)`;
+        }
+      }
+      return null;
+    }
+
+    // Game should still be in progress
+    if (game.winner || game.drawn) return `conquest: game should be in progress but winner=${game.winner} drawn=${game.drawn}`;
     return null;
   }
 
@@ -244,6 +318,34 @@ export function updateGlobalState(game: HyperXOGame): void {
     }
     if (availableMoves(game).length === 0) {
       game.drawn = true;
+    }
+    return;
+  }
+
+  if (game.mode === 'conquest') {
+    const scores = computeConquestScores(game);
+    const bonusSet = new Set(game.conquestBonusBoards);
+    let remainingPoints = 0;
+    for (let i = 0; i < 9; i++) {
+      const b = game.boards[i];
+      if (!b.winner && !b.drawn && !b.condemned) remainingPoints += bonusSet.has(i) ? 2 : 1;
+    }
+
+    // Early termination: trailing player can't catch up
+    if (scores.X > scores.O + remainingPoints) { game.winner = 'X'; return; }
+    if (scores.O > scores.X + remainingPoints) { game.winner = 'O'; return; }
+
+    // All boards finished or no moves left
+    if (remainingPoints === 0 || availableMoves(game).length === 0) {
+      if (scores.X > scores.O) { game.winner = 'X'; return; }
+      if (scores.O > scores.X) { game.winner = 'O'; return; }
+      // Tiebreaker: more bonus boards captured
+      const xBonus = game.conquestBonusBoards.filter(i => game.boards[i].winner === 'X').length;
+      const oBonus = game.conquestBonusBoards.filter(i => game.boards[i].winner === 'O').length;
+      if (xBonus > oBonus) { game.winner = 'X'; return; }
+      if (oBonus > xBonus) { game.winner = 'O'; return; }
+      game.drawn = true;
+      return;
     }
     return;
   }

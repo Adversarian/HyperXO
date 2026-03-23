@@ -24,11 +24,13 @@ export interface GameState {
   moveLog: MoveEntry[];
   lastMove?: MoveEntry;
   aiPending: boolean;
+  conquestScores?: { X: number; O: number };
+  conquestBonusBoards?: number[];
 }
 
 export type Difficulty = 3 | 5 | 8;
 
-export type GameMode = 'classic' | 'sudden-death' | 'misere';
+export type GameMode = 'classic' | 'sudden-death' | 'misere' | 'conquest';
 
 export type Screen = 'menu' | 'ban' | 'draft' | 'game' | 'lobby-create' | 'lobby-join' | 'friend-game';
 

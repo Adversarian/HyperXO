@@ -26,6 +26,8 @@ export default function App() {
   const [opponentName, setOpponentName] = useState('');
   const [friendSymbol, setFriendSymbol] = useState<'X' | 'O'>('X');
   const [friendGambits, setFriendGambits] = useState(false);
+  const [friendMode, setFriendMode] = useState<GameMode>('classic');
+  const [friendBonusBoards, setFriendBonusBoards] = useState<number[] | undefined>(undefined);
   const [fade, setFade] = useState(true);
   const transitioning = useRef(false);
 
@@ -89,8 +91,11 @@ export default function App() {
     [transitionTo]
   );
 
-  const handleHostGame = useCallback(() => {
-    transitionTo(() => setScreen('lobby-create'));
+  const handleHostGame = useCallback((mode: GameMode) => {
+    transitionTo(() => {
+      setGameMode(mode);
+      setScreen('lobby-create');
+    });
   }, [transitionTo]);
 
   const handleJoinGame = useCallback(() => {
@@ -98,13 +103,15 @@ export default function App() {
   }, [transitionTo]);
 
   const handleGameStart = useCallback(
-    (ws: WebSocket, _role: 'host' | 'guest', playerName: string, peerName: string, mySymbol: 'X' | 'O', gambits: boolean) => {
+    (ws: WebSocket, _role: 'host' | 'guest', playerName: string, peerName: string, mySymbol: 'X' | 'O', gambits: boolean, gm: GameMode = 'classic', bonusBoards?: number[]) => {
       transitionTo(() => {
         setFriendWs(ws);
         setMyName(playerName);
         setOpponentName(peerName);
         setFriendSymbol(mySymbol);
         setFriendGambits(gambits);
+        setFriendMode(gm);
+        setFriendBonusBoards(bonusBoards);
         setScreen('friend-game');
       });
     },
@@ -174,7 +181,7 @@ export default function App() {
         )}
 
         {screen === 'lobby-create' && !friendWs && (
-          <Lobby mode="create" onBack={goMenu} onGameStart={handleGameStart} />
+          <Lobby mode="create" gameMode={gameMode} onBack={goMenu} onGameStart={handleGameStart} />
         )}
 
         {screen === 'lobby-join' && !friendWs && (
@@ -188,6 +195,8 @@ export default function App() {
             opponentName={opponentName}
             mySymbol={friendSymbol}
             gambits={friendGambits}
+            gameMode={friendMode}
+            conquestBonusBoards={friendBonusBoards}
             onBack={goMenu}
           />
         )}

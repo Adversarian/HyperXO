@@ -2,14 +2,17 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { createRoom, connectRoom } from '../api';
 
+import type { GameMode } from '../types';
+
 interface Props {
   mode: 'create' | 'join';
   initialRoomId?: string;
+  gameMode?: GameMode;
   onBack: () => void;
-  onGameStart: (ws: WebSocket, role: 'host' | 'guest', myName: string, peerName: string, mySymbol: 'X' | 'O', gambits: boolean) => void;
+  onGameStart: (ws: WebSocket, role: 'host' | 'guest', myName: string, peerName: string, mySymbol: 'X' | 'O', gambits: boolean, gameMode: GameMode, conquestBonusBoards?: number[]) => void;
 }
 
-export default function Lobby({ mode, initialRoomId, onBack, onGameStart }: Props) {
+export default function Lobby({ mode, initialRoomId, gameMode = 'classic', onBack, onGameStart }: Props) {
   const [name, setName] = useState('');
   const [nameSubmitted, setNameSubmitted] = useState(false);
   const [roomId, setRoomId] = useState(initialRoomId ?? '');
@@ -20,6 +23,8 @@ export default function Lobby({ mode, initialRoomId, onBack, onGameStart }: Prop
   const [gambits, setGambits] = useState(false);
   const gambitsRef = useRef(false);
   gambitsRef.current = gambits; // eslint-disable-line
+  const gameModeRef = useRef(gameMode);
+  gameModeRef.current = gameMode; // eslint-disable-line
   const wsRef = useRef<WebSocket | null>(null);
   const roleRef = useRef<'host' | 'guest' | null>(null);
   const nameRef = useRef('');
@@ -46,17 +51,28 @@ export default function Lobby({ mode, initialRoomId, onBack, onGameStart }: Prop
             // Host randomly assigns symbols and tells the guest
             const hostSymbol = Math.random() < 0.5 ? 'X' : 'O';
             const guestSymbol = hostSymbol === 'X' ? 'O' : 'X';
-            ws.send(JSON.stringify({ type: 'assign', hostSymbol, guestSymbol, hostName: nameRef.current, gambits: gambitsRef.current }));
+            const gm = gameModeRef.current;
+            // For conquest, host generates bonus boards so both players use the same ones
+            let bonusBoards: number[] | undefined;
+            if (gm === 'conquest') {
+              const indices = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+              for (let i = indices.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [indices[i], indices[j]] = [indices[j], indices[i]];
+              }
+              bonusBoards = indices.slice(0, 3).sort((a, b) => a - b);
+            }
+            ws.send(JSON.stringify({ type: 'assign', hostSymbol, guestSymbol, hostName: nameRef.current, gambits: gambitsRef.current, gameMode: gm, conquestBonusBoards: bonusBoards }));
             handedOff.current = true;
             ws.onmessage = null;
-            onGameStart(ws, 'host', nameRef.current, peerName, hostSymbol as 'X' | 'O', gambitsRef.current);
+            onGameStart(ws, 'host', nameRef.current, peerName, hostSymbol as 'X' | 'O', gambitsRef.current, gm, bonusBoards);
           }
           // Guest waits for the 'assign' message instead
         } else if (msg.type === 'assign') {
           // Guest receives symbol assignment from host
           handedOff.current = true;
           ws.onmessage = null;
-          onGameStart(ws, 'guest', nameRef.current, msg.hostName, msg.guestSymbol as 'X' | 'O', msg.gambits ?? false);
+          onGameStart(ws, 'guest', nameRef.current, msg.hostName, msg.guestSymbol as 'X' | 'O', msg.gambits ?? false, msg.gameMode ?? 'classic', msg.conquestBonusBoards);
         } else if (msg.type === 'peer-status' && msg.status === 'joined') {
           ws.send(JSON.stringify({ type: 'name', name: nameRef.current }));
           setStatus('Opponent joined...');

@@ -61,6 +61,7 @@ const MODE_LABELS: Record<GameMode, string> = {
   'classic': 'Classic',
   'sudden-death': 'Sudden Death',
   'misere': 'Misère',
+  'conquest': 'Conquest',
 };
 
 const toGameState = (engine: HyperXOGame, lastMove?: MoveEntry) => {
@@ -844,6 +845,16 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         labelO={playerSymbol === 'O' ? youLabel : aiLabel}
       />
 
+      {mode === 'conquest' && game.conquestScores && (
+        <div className="flex items-center gap-3 px-4 py-1.5 rounded-full bg-zinc-800/80 border border-zinc-700/50">
+          <span className="text-cyan-400 font-bold text-sm">{game.conquestScores.X}</span>
+          <span className="text-zinc-600 text-xs">pts</span>
+          <div className="w-px h-4 bg-zinc-700" />
+          <span className="text-rose-400 font-bold text-sm">{game.conquestScores.O}</span>
+          <span className="text-zinc-600 text-xs">pts</span>
+        </div>
+      )}
+
       {phaseHint && (
         <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-4 py-2 text-center">
           <span className="text-amber-400 text-sm font-semibold">{phaseHint.label}</span>
@@ -878,6 +889,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
             targeting={targeting}
             flashBoards={flashBoards.size > 0 ? flashBoards : undefined}
             siegeCells={siegeCellsMap}
+            conquestBonusBoards={game.conquestBonusBoards ? new Set(game.conquestBonusBoards) : undefined}
           />
           {hasGambits && <CombatLog entries={combatLog} />}
         </div>

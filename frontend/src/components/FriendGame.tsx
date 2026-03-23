@@ -31,12 +31,16 @@ import CardTray from './CardTray';
 import BanScreen from './BanScreen';
 import DraftScreen from './DraftScreen';
 
+import type { GameMode } from '../types';
+
 interface Props {
   ws: WebSocket;
   myName: string;
   opponentName: string;
   mySymbol: 'X' | 'O';
   gambits: boolean;
+  gameMode?: GameMode;
+  conquestBonusBoards?: number[];
   onBack: () => void;
 }
 
@@ -45,7 +49,7 @@ type Phase = 'ban' | 'waiting-bans' | 'draft' | 'waiting-draft' | 'playing';
 const toGameState = (engine: HyperXOGame, lastMove?: MoveEntry) =>
   _engineToGameState(engine, 'p2p', lastMove);
 
-export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits, onBack }: Props) {
+export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits, gameMode = 'classic', conquestBonusBoards, onBack }: Props) {
   // ===== Core state =====
   const [game, setGame] = useState<GameState | null>(null);
   const [peerLeft, setPeerLeft] = useState(false);
@@ -139,7 +143,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
   // ===== Init game =====
 
   const initGame = useCallback(() => {
-    const engine = createEngine();
+    const engine = createEngine(gameMode, gameMode === 'conquest' ? conquestBonusBoards : undefined);
     engineRef.current = engine;
     if (gambits && myDraftRef.current) {
       const pu = createPowerUpState(myDraftRef.current);
@@ -171,7 +175,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
     setOpponentSiegeDisplay([]);
     setGame(toGameState(engine));
     setPhase('playing');
-  }, [gambits, updateMySiege]);
+  }, [gambits, gameMode, conquestBonusBoards, updateMySiege]);
 
   useEffect(() => {
     if (!gambits) initGame();
@@ -962,6 +966,11 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
           <span className="text-sm font-medium text-cyan-400">{xName} (X)</span>
           <span className="text-zinc-600 text-xs">vs</span>
           <span className="text-sm font-medium text-rose-400">{oName} (O)</span>
+          {gameMode !== 'classic' && (
+            <span className="text-xs text-zinc-500 border border-zinc-700 rounded px-1.5 py-0.5">
+              {gameMode === 'sudden-death' ? 'Sudden Death' : gameMode === 'misere' ? 'Misère' : 'Conquest'}
+            </span>
+          )}
           {gambits && (
             <span className="text-xs text-zinc-500 border border-zinc-700 rounded px-1.5 py-0.5">Gambits</span>
           )}
@@ -992,6 +1001,16 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         labelO={{ turn: `${oName}'s turn`, win: `${oName} wins` }}
       />
 
+      {gameMode === 'conquest' && game.conquestScores && (
+        <div className="flex items-center gap-3 px-4 py-1.5 rounded-full bg-zinc-800/80 border border-zinc-700/50">
+          <span className="text-cyan-400 font-bold text-sm">{game.conquestScores.X}</span>
+          <span className="text-zinc-600 text-xs">pts</span>
+          <div className="w-px h-4 bg-zinc-700" />
+          <span className="text-rose-400 font-bold text-sm">{game.conquestScores.O}</span>
+          <span className="text-zinc-600 text-xs">pts</span>
+        </div>
+      )}
+
       {phaseHint && (
         <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-4 py-2 text-center">
           <span className="text-amber-400 text-sm font-semibold">{phaseHint.label}</span>
@@ -1010,6 +1029,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         targeting={targeting}
         flashBoards={flashBoards.size > 0 ? flashBoards : undefined}
         siegeCells={siegeCellsMap}
+        conquestBonusBoards={game.conquestBonusBoards ? new Set(game.conquestBonusBoards) : undefined}
       />
 
       {myPU && (

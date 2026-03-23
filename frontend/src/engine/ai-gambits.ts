@@ -29,6 +29,7 @@ import {
   applyCondemn,
 } from './powerups';
 import { evaluateForPlayer, choose, createAI } from './ai';
+import { computeConquestScores } from './game';
 
 // ---- Snapshot / Restore (for simulating card effects) ----
 
@@ -115,6 +116,11 @@ const CARD_THREAT_MISERE: Record<string, number> = {
   'overwrite': 5, 'redirect': 5, 'arsenal': 5, 'momentum': 4,
   'recall': 4, 'haste': 3, 'double-down': 3, 'siege': 3,
 };
+const CARD_THREAT_CONQUEST: Record<string, number> = {
+  'shatter': 9, 'haste': 8, 'overwrite': 7, 'sabotage': 7,
+  'condemn': 6, 'momentum': 6, 'double-down': 5, 'arsenal': 5,
+  'redirect': 4, 'swap': 4, 'recall': 4, 'siege': 3,
+};
 
 /** AI picks one card to ban based on game mode and difficulty. */
 export function aiBan(
@@ -123,6 +129,7 @@ export function aiBan(
 ): PowerUpCard {
   const threats = mode === 'sudden-death' ? CARD_THREAT_SUDDEN_DEATH
     : mode === 'misere' ? CARD_THREAT_MISERE
+    : mode === 'conquest' ? CARD_THREAT_CONQUEST
     : CARD_THREAT_CLASSIC;
 
   const allCards: PowerUpCard[] = [
@@ -545,6 +552,40 @@ export function computeUrgency(
   let opponentMacroThreats = 0;
   let aiMacroThreats = 0;
 
+  // Conquest mode uses score-based urgency instead of macro line threats
+  if (game.mode === 'conquest') {
+    const scores = computeConquestScores(game);
+    const bonusSet = new Set(game.conquestBonusBoards);
+    let remainingPoints = 0;
+    for (let i = 0; i < 9; i++) {
+      const b = game.boards[i];
+      if (!b.winner && !b.drawn && !b.condemned) remainingPoints += bonusSet.has(i) ? 2 : 1;
+    }
+    const decidedBoards = bb.filter(b => b !== '.').length;
+    const gameProgress = decidedBoards / 9;
+    const cardsRemaining = getAvailableCards(puState).length;
+
+    let multiplier = 1.0;
+    const myScore = scores[aiPlayer];
+    const oppScore = scores[opponent];
+
+    // Score pressure: opponent is ahead → urgent
+    if (oppScore > myScore + 2) multiplier *= 2.5;
+    else if (oppScore > myScore) multiplier *= 1.8;
+
+    // Score opportunity: we're ahead → press advantage
+    if (myScore > oppScore + 2) multiplier *= 1.8;
+    else if (myScore > oppScore) multiplier *= 1.3;
+
+    // Approaching early termination: remaining points shrinking
+    if (remainingPoints <= 3) multiplier *= 1.5;
+
+    multiplier *= 1.0 + gameProgress * 1.5;
+    if (cardsRemaining === 1) multiplier *= 0.8;
+
+    return { multiplier, opponentMacroThreats: 0, aiMacroThreats: 0, gameProgress, cardsRemaining };
+  }
+
   for (const [a, b, c] of WINNING_LINES) {
     const marks = [bb[a], bb[b], bb[c]];
     const aiCount = marks.filter(m => m === aiPlayer).length;
@@ -595,6 +636,13 @@ function cardContextBonus(
   decision: AiCardDecision,
   aiPlayer: Player,
 ): number {
+  // Conquest: macro lines are irrelevant; bonus for targeting high-value boards
+  if (game.mode === 'conquest') {
+    const targetBoard = decision.boardIdx ?? decision.toBoard;
+    if (targetBoard === undefined) return 1.0;
+    return new Set(game.conquestBonusBoards).has(targetBoard) ? 1.5 : 1.0;
+  }
+
   const opponent: Player = aiPlayer === 'X' ? 'O' : 'X';
   const bb = bigBoardState(game);
 

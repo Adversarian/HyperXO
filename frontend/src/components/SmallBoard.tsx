@@ -16,6 +16,7 @@ interface Props {
   siegeCells?: Set<number>;
   isHoverTarget?: boolean;
   currentPlayer?: string;
+  isBonusBoard?: boolean;
 }
 
 const FLASH_CLASSES: Record<string, string> = {
@@ -60,6 +61,7 @@ export default function SmallBoard({
   siegeCells,
   isHoverTarget,
   currentPlayer,
+  isBonusBoard,
 }: Props) {
   const resolved = board.winner || board.drawn || board.condemned;
   const winLine = board.winner ? getWinLine(board.cells, board.winner) : null;
@@ -84,6 +86,15 @@ export default function SmallBoard({
 
   return (
     <div className={`relative grid grid-cols-3 grid-rows-3 gap-0.5 sm:gap-1 rounded-lg sm:rounded-xl p-1 sm:p-1.5 transition-all duration-200 ${bgColor}`}>
+      {/* Bonus board amber tint — sits behind everything */}
+      {isBonusBoard && (
+        <>
+          <div className="absolute inset-0 rounded-lg sm:rounded-xl bg-amber-400/[0.07] pointer-events-none" />
+          {!resolved && (
+            <span className="absolute top-0.5 right-1 z-[5] text-amber-400/40 text-[7px] sm:text-[9px] font-bold pointer-events-none select-none">x2</span>
+          )}
+        </>
+      )}
       {/* Win line SVG — inset by padding, viewBox maps to cell grid */}
       {board.winner && winLine && !targetMode && (() => {
         const cx = (i: number) => (i % 3) * 2 + 1;

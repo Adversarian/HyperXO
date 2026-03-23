@@ -1,4 +1,4 @@
-import { availableMoves, type HyperXOGame, type Player } from './game';
+import { availableMoves, computeConquestScores, type HyperXOGame, type Player } from './game';
 import type { GameState, MoveEntry } from '../types';
 
 /** Convert engine state to the UI-facing GameState. */
@@ -8,7 +8,7 @@ export function engineToGameState(
   lastMove?: MoveEntry,
 ): GameState {
   const moves = availableMoves(engine);
-  return {
+  const gs: GameState = {
     id,
     currentPlayer: engine.currentPlayer,
     nextBoardIndex: engine.nextBoardIndex,
@@ -27,6 +27,11 @@ export function engineToGameState(
     lastMove,
     aiPending: false,
   };
+  if (engine.mode === 'conquest') {
+    gs.conquestScores = computeConquestScores(engine);
+    gs.conquestBonusBoards = engine.conquestBonusBoards;
+  }
+  return gs;
 }
 
 /** Check if a board is live (not won, drawn, condemned, and has empty cells). */

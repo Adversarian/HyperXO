@@ -39,6 +39,10 @@ a client-side minimax AI, and peer-to-peer multiplayer via an embedded WebSocket
 - **Classic** — standard Ultimate Tic-Tac-Toe rules (complete a row, column, or diagonal of won boards on the macro grid).
 - **Sudden Death** — first player to win any single board wins the game.
 - **Misère** — completing a row, column, or diagonal of won boards means that player *loses*.
+- **Conquest** — point-based mode. 3 random boards are marked as high-value (2 pts each), the rest
+  are worth 1 pt. Most points wins. Early termination when trailing player can't catch up.
+  Tiebreaker: more high-value boards captured. Engine: `computeConquestScores()`, `conquestBonusBoards`
+  field on `HyperXOGame`. AI has a dedicated `evaluateConquest()` function.
 - **Gambits** — ban phase + draft-based tactical cards with active abilities and passive doctrines.
   Full AI support with card-aware evaluation, urgency-based timing, and mode-specific adjustments.
   See `GAMBITS.md` for the full design document.

@@ -8,6 +8,7 @@ import {
   undoMove,
   captureUndo,
   bigBoardState,
+  computeConquestScores,
 } from './game';
 
 // TT entry flags
@@ -234,6 +235,7 @@ function evaluate(ai: MinimaxAI, game: HyperXOGame): number {
   switch (game.mode) {
     case 'sudden-death': return evaluateSuddenDeath(ai, game);
     case 'misere': return evaluateMisere(ai, game);
+    case 'conquest': return evaluateConquest(ai, game);
     default: return evaluateClassic(ai, game);
   }
 }
@@ -708,6 +710,165 @@ function cardAdjustmentsMisere(
   // We have haste/double-down → risky for us in misère (might win unwanted boards)
   if (myCards.includes('haste')) adj -= 2;
   if (myCards.includes('double-down')) adj -= 1;
+
+  return adj;
+}
+
+function evaluateConquest(ai: MinimaxAI, game: HyperXOGame): number {
+  const me = ai.player;
+  const opp: Player = me === 'X' ? 'O' : 'X';
+  const ctx = ai.cardCtx;
+  const bonusSet = new Set(game.conquestBonusBoards);
+
+  let score = 0;
+
+  // Point differential: the primary driver
+  const scores = computeConquestScores(game);
+  const myScore = scores[me];
+  const oppScore = scores[opp];
+  score += (myScore - oppScore) * 30;
+
+  // Micro-board detail: weight threats by board value
+  for (let bi = 0; bi < 9; bi++) {
+    const board = game.boards[bi];
+    const boardValue = bonusSet.has(bi) ? 2 : 1;
+
+    if (board.winner === me) continue; // already counted in point differential
+    if (board.winner === opp) continue;
+    if (board.drawn || board.condemned) continue;
+
+    for (const [a, b, c] of WINNING_LINES) {
+      const trio = [board.cells[a], board.cells[b], board.cells[c]];
+      if (!trio.includes(opp)) {
+        const cnt = trio.filter(t => t === me).length;
+        if (cnt === 1) score += 1 * boardValue;
+        else if (cnt === 2) score += 5 * boardValue;
+      }
+      if (!trio.includes(me)) {
+        const cnt = trio.filter(t => t === opp).length;
+        if (cnt === 1) score -= 1 * boardValue;
+        else if (cnt === 2) score -= 5 * boardValue;
+      }
+    }
+
+    if (board.cells[4] === me) score += 0.3 * boardValue;
+    else if (board.cells[4] === opp) score -= 0.3 * boardValue;
+  }
+
+  if (ctx) score += cardAdjustmentsConquest(game, me, opp, ctx, bonusSet);
+
+  return score;
+}
+
+/** Card adjustments for conquest — point-based scoring. */
+function cardAdjustmentsConquest(
+  game: HyperXOGame,
+  me: Player,
+  opp: Player,
+  ctx: CardContext,
+  bonusSet: Set<number>,
+): number {
+  const { myCards, opponentCards } = ctx;
+  let adj = 0;
+
+  // Opponent has shatter → our won boards (especially bonus) are fragile
+  if (opponentCards.includes('shatter')) {
+    for (let i = 0; i < 9; i++) {
+      if (game.boards[i].winner === me) adj -= bonusSet.has(i) ? 12 : 6;
+      if (game.boards[i].winner === opp) adj += bonusSet.has(i) ? 8 : 4;
+    }
+  }
+
+  // Opponent has overwrite → our blocks on high-value boards are unreliable
+  if (opponentCards.includes('overwrite')) {
+    for (let i = 0; i < 9; i++) {
+      const board = game.boards[i];
+      if (board.winner || board.drawn || board.condemned) continue;
+      const bv = bonusSet.has(i) ? 2 : 1;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === opp).length === 2 && trio.filter(t => t === me).length === 1)
+          adj -= 3 * bv;
+      }
+    }
+  }
+
+  // Opponent has sabotage → our thin wins on valuable boards are fragile
+  if (opponentCards.includes('sabotage')) {
+    for (let i = 0; i < 9; i++) {
+      if (game.boards[i].winner !== me) continue;
+      let winLines = 0;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [game.boards[i].cells[a], game.boards[i].cells[b], game.boards[i].cells[c]];
+        if (trio.every(t => t === me)) winLines++;
+      }
+      if (winLines === 1) adj -= bonusSet.has(i) ? 8 : 4;
+    }
+  }
+
+  // Opponent has condemn → can remove a high-value board from play (0 points for both)
+  if (opponentCards.includes('condemn')) {
+    for (let i = 0; i < 9; i++) {
+      const board = game.boards[i];
+      if (board.winner || board.drawn || board.condemned) continue;
+      // If we're likely to win this board and it's valuable, condemn is a threat
+      const bv = bonusSet.has(i) ? 2 : 1;
+      let myThreats = 0;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === me).length === 2 && trio.filter(t => t === '').length === 1) myThreats++;
+      }
+      if (myThreats > 0) adj -= bv * 3;
+    }
+  }
+
+  // Opponent has haste → their threats on valuable boards are scarier
+  if (opponentCards.includes('haste')) {
+    for (let i = 0; i < 9; i++) {
+      const board = game.boards[i];
+      if (board.winner || board.drawn || board.condemned) continue;
+      const bv = bonusSet.has(i) ? 2 : 1;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === opp).length === 2 && trio.filter(t => t === '').length === 1)
+          adj -= 2 * bv;
+      }
+    }
+  }
+
+  // --- Our card potential ---
+
+  if (myCards.includes('overwrite')) {
+    for (let i = 0; i < 9; i++) {
+      const board = game.boards[i];
+      if (board.winner || board.drawn || board.condemned) continue;
+      const bv = bonusSet.has(i) ? 2 : 1;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === me).length === 2 && trio.filter(t => t === opp).length === 1)
+          adj += 3 * bv;
+      }
+    }
+  }
+
+  if (myCards.includes('shatter')) {
+    for (let i = 0; i < 9; i++) {
+      if (game.boards[i].winner === opp) adj += bonusSet.has(i) ? 8 : 4;
+    }
+  }
+
+  if (myCards.includes('haste')) {
+    for (let i = 0; i < 9; i++) {
+      const board = game.boards[i];
+      if (board.winner || board.drawn || board.condemned) continue;
+      const bv = bonusSet.has(i) ? 2 : 1;
+      for (const [a, b, c] of WINNING_LINES) {
+        const trio = [board.cells[a], board.cells[b], board.cells[c]];
+        if (trio.filter(t => t === me).length === 2 && trio.filter(t => t === '').length === 1)
+          adj += 2 * bv;
+      }
+    }
+  }
 
   return adj;
 }

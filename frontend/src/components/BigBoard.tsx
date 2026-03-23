@@ -13,9 +13,10 @@ interface Props {
   } | null;
   flashBoards?: Map<number, string>;
   siegeCells?: Map<number, Set<number>>;
+  conquestBonusBoards?: Set<number>;
 }
 
-export default function BigBoard({ game, onCellClick, disabled, targeting, flashBoards, siegeCells }: Props) {
+export default function BigBoard({ game, onCellClick, disabled, targeting, flashBoards, siegeCells, conquestBonusBoards }: Props) {
   const [hoverTarget, setHoverTarget] = useState<number | null>(null);
 
   const availableByBoard = new Map<number, Set<number>>();
@@ -63,6 +64,7 @@ export default function BigBoard({ game, onCellClick, disabled, targeting, flash
             siegeCells={siegeCells?.get(board.index)}
             isHoverTarget={hoverTarget === board.index}
             currentPlayer={game.currentPlayer}
+            isBonusBoard={conquestBonusBoards?.has(board.index)}
           />
         );
       })}
