@@ -90,7 +90,7 @@ export default function PassAndPlay({ mode, nameX, nameO, draftX, draftO, onBack
   const siegeORef = useRef<SiegeThreat[]>([]);
   const hasteFirstRef = useRef(false);
   const preCardWinnersRef = useRef<(Player | null)[] | null>(null);
-  const redirectPrevRef = useRef<{ prevWinners: (Player | null)[]; lastMove: { player: string; boardIndex: number; cellIndex: number } } | null>(null);
+  const redirectTargetRef = useRef<number | null>(null);
   const cardUsedThisTurnRef = useRef<ActiveCard | null>(null);
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -260,7 +260,7 @@ export default function PassAndPlay({ mode, nameX, nameO, draftX, draftO, onBack
     siegeORef.current = [];
     hasteFirstRef.current = false;
     preCardWinnersRef.current = null;
-    redirectPrevRef.current = null;
+    redirectTargetRef.current = null;
     setActivatingCard(null);
     setCardUsedThisTurn(null);
     cardUsedThisTurnRef.current = null;
@@ -300,6 +300,7 @@ export default function PassAndPlay({ mode, nameX, nameO, draftX, draftO, onBack
   const cancelActivation = useCallback(() => {
     setActivatingCard(null);
     setRecallSource(null);
+    redirectTargetRef.current = null;
   }, []);
 
   // ---- Click handler ----
@@ -316,6 +317,13 @@ export default function PassAndPlay({ mode, nameX, nameO, draftX, draftO, onBack
       if (activatingCard && turnPhase === 'normal') {
         const card = activatingCard;
         const playerColor = currentPlayer === 'X' ? 'text-cyan-400' : 'text-rose-400';
+
+        // Redirect: pre-select target board, then place piece normally
+        if (card === 'redirect' && redirectTargetRef.current === null) {
+          redirectTargetRef.current = boardIndex;
+          refreshGame();
+          return;
+        }
 
         // Board-target cards
         if (card === 'condemn' || card === 'swap' || card === 'shatter' || card === 'gravity') {
@@ -377,22 +385,6 @@ export default function PassAndPlay({ mode, nameX, nameO, draftX, draftO, onBack
         // Flow modifiers: fall through to placement
       }
 
-      // --- Redirect-pick phase ---
-      if (turnPhase === 'redirect-pick') {
-        try {
-          applyRedirect(engine, boardIndex);
-        } catch { /* invalid target */ return; }
-        setTurnPhase('normal');
-        const rp = redirectPrevRef.current;
-        redirectPrevRef.current = null;
-        if (rp) {
-          afterTurn(engine, rp.lastMove, rp.prevWinners);
-        } else {
-          refreshGame();
-        }
-        return;
-      }
-
       // --- Momentum-bonus phase ---
       if (turnPhase === 'momentum-bonus') {
         const legal = availableMoves(engine).some(([b, c]) => b === boardIndex && c === cellIndex);
@@ -433,16 +425,17 @@ export default function PassAndPlay({ mode, nameX, nameO, draftX, draftO, onBack
         return;
       }
 
-      if (activatingCard === 'redirect' && !engine.winner && !engine.drawn) {
+      if (activatingCard === 'redirect' && redirectTargetRef.current !== null && !engine.winner && !engine.drawn) {
+        try { applyRedirect(engine, redirectTargetRef.current); } catch { /* target invalid */ }
+        redirectTargetRef.current = null;
         commitCard('redirect');
         logEvent(`${getName(currentPlayer)} used Redirect!`, playerColor);
-        redirectPrevRef.current = { prevWinners, lastMove };
-        setTurnPhase('redirect-pick');
-        setGame(toGameState(engine, lastMove));
+        afterTurn(engine, lastMove, prevWinners);
         return;
       }
 
       // Normal move
+      redirectTargetRef.current = null;
       setActivatingCard(null);
       afterTurn(engine, lastMove, prevWinners);
     },
@@ -453,16 +446,7 @@ export default function PassAndPlay({ mode, nameX, nameO, draftX, draftO, onBack
 
   const targeting = (() => {
     const engine = engineRef.current;
-    if (!engine || !activatingCard || turnPhase !== 'normal') {
-      if (turnPhase === 'redirect-pick' && engine) {
-        const validBoards = new Set<number>();
-        for (let i = 0; i < 9; i++) {
-          if (isBoardLive(engine, i)) validBoards.add(i);
-        }
-        return { mode: 'board' as const, validBoards };
-      }
-      return null;
-    }
+    if (!engine || !activatingCard || turnPhase !== 'normal') return null;
 
     const currentPlayer = engine.currentPlayer;
     const opponent = currentPlayer === 'X' ? 'O' : 'X';
@@ -487,6 +471,8 @@ export default function PassAndPlay({ mode, nameX, nameO, draftX, draftO, onBack
         return { mode: 'opponent-cell' as const, validBoards, opponentSymbol: '' };
       }
     }
+
+    if (activatingCard === 'redirect' && redirectTargetRef.current !== null) return null;
 
     if (def.targetType === 'board') {
       const validBoards = new Set<number>();
@@ -536,8 +522,8 @@ export default function PassAndPlay({ mode, nameX, nameO, draftX, draftO, onBack
   const phaseHint =
     turnPhase === 'haste-second'
       ? { label: 'Haste', desc: 'Take your second consecutive turn' }
-      : turnPhase === 'redirect-pick'
-          ? { label: 'Redirect', desc: 'Click a board to send your opponent there' }
+      : activatingCard === 'redirect' && redirectTargetRef.current !== null
+          ? { label: 'Redirect', desc: 'Place your piece — opponent will be redirected' }
           : turnPhase === 'momentum-bonus'
             ? { label: 'Momentum', desc: 'You won a board — take a bonus turn!' }
             : activatingCard === 'recall' && !recallSource

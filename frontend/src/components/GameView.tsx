@@ -103,7 +103,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   const engineRef = useRef<HyperXOGame | null>(null);
   const aiRef = useRef<MinimaxAI | null>(null);
   const siegeRef = useRef<SiegeThreat[]>([]);
-  const redirectPrevRef = useRef<{ prevWinners: (Player | null)[]; lastMove: { player: string; boardIndex: number; cellIndex: number } } | null>(null);
+  const redirectTargetRef = useRef<number | null>(null);
   const hasteFirstRef = useRef(false);
   const preCardWinnersRef = useRef<(Player | null)[] | null>(null);
 
@@ -475,6 +475,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     setActivatingCard(null);
     setCardUsedThisTurn(null);
     setRecallSource(null);
+    redirectTargetRef.current = null;
     setTurnPhase('normal');
     setGravityAnimation(null);
     updateSiege([]);
@@ -526,11 +527,13 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
 
     setActivatingCard(card);
     setRecallSource(null);
+    redirectTargetRef.current = null;
   }, [playerPU, playerSymbol]);
 
   const cancelActivation = useCallback(() => {
     setActivatingCard(null);
     setRecallSource(null);
+    redirectTargetRef.current = null;
   }, []);
 
   // --- Click handler ---
@@ -545,6 +548,13 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       // --- Pre-placement targeting ---
       if (activatingCard && turnPhase === 'normal') {
         const card = activatingCard;
+
+        // Redirect: pre-select target board, then place piece normally
+        if (card === 'redirect' && redirectTargetRef.current === null) {
+          redirectTargetRef.current = boardIndex;
+          refreshGame();
+          return;
+        }
 
         // Board-target cards (pre-placement)
         if (card === 'condemn' || card === 'swap' || card === 'shatter' || card === 'gravity') {
@@ -606,23 +616,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         // Flow modifiers: fall through to placement (handled below)
       }
 
-      // --- Redirect-pick phase ---
-      if (turnPhase === 'redirect-pick') {
-        try {
-          applyRedirect(engine, boardIndex);
-        } catch { /* invalid target, ignore */ return; }
-        setTurnPhase('normal');
-        const rp = redirectPrevRef.current;
-        redirectPrevRef.current = null;
-        if (rp) {
-          afterPlayerTurn(engine, rp.lastMove, rp.prevWinners);
-        } else {
-          refreshGame();
-          doAiResponse();
-        }
-        return;
-      }
-
       // --- Momentum-bonus phase ---
       if (turnPhase === 'momentum-bonus') {
         if (aiThinking) return;
@@ -665,36 +658,28 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         return;
       }
 
-      if (activatingCard === 'redirect' && !engine.winner && !engine.drawn) {
+      if (activatingCard === 'redirect' && redirectTargetRef.current !== null && !engine.winner && !engine.drawn) {
+        try { applyRedirect(engine, redirectTargetRef.current); } catch { /* target invalid */ }
+        redirectTargetRef.current = null;
         commitCard('redirect');
         logEvent('You used Redirect!', 'text-cyan-400');
-        redirectPrevRef.current = { prevWinners, lastMove };
-        setTurnPhase('redirect-pick');
-        setGame(toGameState(engine, lastMove));
+        afterPlayerTurn(engine, lastMove, prevWinners);
         return;
       }
 
       // --- Normal: check passives, then AI responds ---
+      redirectTargetRef.current = null;
       setActivatingCard(null);
       afterPlayerTurn(engine, lastMove, prevWinners);
     },
-    [activatingCard, turnPhase, aiThinking, playerSymbol, commitCard, refreshGame, doAiResponse, afterPlayerTurn, triggerFlash, logEvent, recallSource]
+    [activatingCard, turnPhase, aiThinking, playerSymbol, commitCard, refreshGame, afterPlayerTurn, triggerFlash, logEvent, recallSource]
   );
 
   // --- Compute targeting info ---
 
   const targeting = (() => {
     const engine = engineRef.current;
-    if (!engine || !activatingCard || turnPhase !== 'normal') {
-      if (turnPhase === 'redirect-pick' && engine) {
-        const validBoards = new Set<number>();
-        for (let i = 0; i < 9; i++) {
-          if (isBoardLive(engine, i)) validBoards.add(i);
-        }
-        return { mode: 'board' as const, validBoards };
-      }
-      return null;
-    }
+    if (!engine || !activatingCard || turnPhase !== 'normal') return null;
 
     const def = CARD_CATALOG[activatingCard];
 
@@ -717,6 +702,9 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         return { mode: 'opponent-cell' as const, validBoards, opponentSymbol: '' };
       }
     }
+
+    // Redirect: target already selected, switch to normal placement mode
+    if (activatingCard === 'redirect' && redirectTargetRef.current !== null) return null;
 
     if (def.targetType === 'board') {
       const validBoards = new Set<number>();
@@ -765,8 +753,8 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   const phaseHint =
     turnPhase === 'haste-second'
       ? { label: 'Haste', desc: 'Take your second consecutive turn' }
-      : turnPhase === 'redirect-pick'
-          ? { label: 'Redirect', desc: 'Click a board to send your opponent there' }
+      : activatingCard === 'redirect' && redirectTargetRef.current !== null
+          ? { label: 'Redirect', desc: 'Place your piece — opponent will be redirected' }
           : turnPhase === 'momentum-bonus'
             ? { label: 'Momentum', desc: 'You won a board — take a bonus turn!' }
             : activatingCard === 'recall' && !recallSource
