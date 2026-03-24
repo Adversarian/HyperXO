@@ -287,7 +287,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       const allNewlyWon = getNewlyWonBoards(engine, prevWinners);
       const moverWonAfterSiege = allNewlyWon.some(w => w.winner === mover);
 
-      // Arsenal: recharge a random used card when you win a board (exclude card used this turn)
+      // Arsenal: recharge a random used card when you win a board on your turn
       if (moverDoc === 'arsenal' && moverWonAfterSiege && !engine.winner && !engine.drawn) {
         const moverPU = mover === mySymbol ? myPURef.current : opponentPURef.current;
         const moverExclude = mover === mySymbol ? cardUsedThisTurnRef.current : opponentCardThisTurnRef.current;
@@ -299,18 +299,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
           }
         }
       }
-      if (otherDoc === 'arsenal' && allNewlyWon.some(w => w.winner === other) && !engine.winner && !engine.drawn) {
-        const otherPU = other === mySymbol ? myPURef.current : opponentPURef.current;
-        const otherExclude = other === mySymbol ? cardUsedThisTurnRef.current : opponentCardThisTurnRef.current;
-        if (otherPU) {
-          const recharged = rechargeRandomCard(otherPU, otherExclude ?? undefined);
-          if (recharged) {
-            if (other === mySymbol) setMyPU({ ...otherPU });
-            else { setOpponentCardNotice(`Arsenal — ${CARD_CATALOG[recharged].name} recharged`); setTimeout(() => setOpponentCardNotice(null), 2500); }
-          }
-        }
-      }
-
       // Momentum: mover gets bonus turn
       if (moverDoc === 'momentum' && moverWonBoard) {
         engine.currentPlayer = mover;

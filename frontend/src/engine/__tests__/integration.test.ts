@@ -187,19 +187,17 @@ function executeAiTurn(game: HyperXOGame, player: SimPlayer, opponent: SimPlayer
     }
   }
 
-  // Step 8: Arsenal passive — recharge a random used card when you win a board
-  for (const p of [player, opponent]) {
-    if (p.doctrine !== 'arsenal') continue;
-    if (game.winner || game.drawn) break;
-    const wonByMe = newlyWon.some(w => w.winner === p.ai.player);
-    if (!wonByMe) continue;
-    // Exclude the card used this turn (prevent instant recharge loop)
-    const exclude = (p === player && result.cardUsed) ? result.cardUsed.card : undefined;
-    const usedCards = getActiveCards(p.puState.draft).filter(c => isCardUsed(p.puState, c) && c !== exclude);
-    if (usedCards.length > 0) {
-      const pick = usedCards[Math.floor(Math.random() * usedCards.length)];
-      p.puState.used[pick] = false;
-      result.passivesTriggered.push(`arsenal-${p.ai.player}`);
+  // Step 8: Arsenal passive — recharge a random used card when you win a board on your turn
+  if (player.doctrine === 'arsenal' && !game.winner && !game.drawn) {
+    const wonByMe = newlyWon.some(w => w.winner === player.ai.player);
+    if (wonByMe) {
+      const exclude = result.cardUsed ? result.cardUsed.card : undefined;
+      const usedCards = getActiveCards(player.puState.draft).filter(c => isCardUsed(player.puState, c) && c !== exclude);
+      if (usedCards.length > 0) {
+        const pick = usedCards[Math.floor(Math.random() * usedCards.length)];
+        player.puState.used[pick] = false;
+        result.passivesTriggered.push(`arsenal-${player.ai.player}`);
+      }
     }
   }
 
@@ -799,7 +797,7 @@ describe('Passive trigger chains', () => {
     assertGameInvariant(game, 'After siege claim');
   });
 
-  it('arsenal recharges a used card when you win a board', () => {
+  it('arsenal recharges a used card when you win a board on your turn', () => {
     const pu = createPowerUpState({ strike: 'haste', tactics: 'condemn', disruption: 'sabotage', doctrine: 'arsenal' });
     // Mark all active cards as used
     useCard(pu, 'haste');
@@ -1308,7 +1306,7 @@ describe('Infinite passive chain prevention', () => {
   it('momentum + arsenal interaction works correctly', () => {
     // Set up: X has momentum, O has arsenal with used cards.
     // X wins a board → momentum gives X another turn.
-    // O's arsenal should NOT trigger (O didn't win the board).
+    // O's arsenal should NOT trigger (O didn't win a board on O's turn).
     const game = createGame();
     game.boards[0].cells = ['X', 'X', '', '', '', '', '', '', ''];
     game.nextBoardIndex = 0;

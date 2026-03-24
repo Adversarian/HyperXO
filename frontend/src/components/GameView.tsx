@@ -239,19 +239,13 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     // Recompute newly won boards after siege (siege claims can win boards)
     const allNewlyWon = getNewlyWonBoards(engine, prevWinners);
 
-    // AI arsenal: AI won a board → recharge a random used card (exclude card used this turn)
+    // AI arsenal: AI won a board on its turn → recharge a random used card
     if (aiDoctrine === 'arsenal' && allNewlyWon.some(w => w.winner === aiSymbol) && !engine.winner && !engine.drawn) {
       const aPU = aiPURef.current;
       if (aPU) {
         const recharged = rechargeRandomCard(aPU, aiCardThisTurnRef.current ?? undefined);
         if (recharged) { logEvent(`${aiName}: Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setAiPUDisplay({ ...aPU }); }
       }
-    }
-
-    // Player arsenal: player won a board during AI's turn (e.g. via siege) → recharge
-    if (doctrine === 'arsenal' && allNewlyWon.some(w => w.winner === playerSymbol) && !engine.winner && !engine.drawn && playerPU) {
-      const recharged = rechargeRandomCard(playerPU, cardUsedThisTurn ?? undefined);
-      if (recharged) { logEvent(`Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setPlayerPU({ ...playerPU }); }
     }
 
     // AI haste second turn
@@ -282,7 +276,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     setGame(toGameState(engine, lastMove));
     setAiThinking(false);
     setCardUsedThisTurn(null);
-  }, [aiSymbol, aiName, aiDoctrine, doctrine, playerSymbol, playerPU, cardUsedThisTurn, triggerFlash, logEvent, updateSiege]);
+  }, [aiSymbol, aiName, aiDoctrine, doctrine, playerSymbol, triggerFlash, logEvent, updateSiege]);
 
   // ---- Execute full AI turn (with card support) ----
 
@@ -452,16 +446,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     // Recompute newly won boards after siege (siege claims can win boards)
     const allNewlyWon = getNewlyWonBoards(engine, prevWinners);
 
-    // AI arsenal: AI won a board after player's turn (e.g. siege) → recharge (exclude card AI used last)
-    if (aiDoctrine === 'arsenal' && allNewlyWon.some(w => w.winner === aiSymbol) && !engine.winner && !engine.drawn) {
-      const aPU = aiPURef.current;
-      if (aPU) {
-        const recharged = rechargeRandomCard(aPU, aiCardThisTurnRef.current ?? undefined);
-        if (recharged) { logEvent(`${aiName}: Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setAiPUDisplay({ ...aPU }); }
-      }
-    }
-
-    // Player arsenal: player won a board → recharge a random used card (exclude card used this turn)
+    // Player arsenal: player won a board on their turn → recharge a random used card
     if (doctrine === 'arsenal' && allNewlyWon.some(w => w.winner === playerSymbol) && !engine.winner && !engine.drawn && playerPU) {
       const recharged = rechargeRandomCard(playerPU, cardUsedThisTurn ?? undefined);
       if (recharged) { logEvent(`Arsenal — ${CARD_CATALOG[recharged].name} recharged!`, 'text-emerald-400'); setPlayerPU({ ...playerPU }); }
