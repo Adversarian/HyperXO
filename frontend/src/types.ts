@@ -32,6 +32,7 @@ export type Difficulty = 3 | 5 | 8;
 
 export type GameMode = 'classic' | 'sudden-death' | 'misere' | 'conquest';
 
-export type Screen = 'menu' | 'ban' | 'draft' | 'game' | 'lobby-create' | 'lobby-join' | 'friend-game';
+export type Screen = 'menu' | 'ban' | 'draft' | 'game' | 'lobby-create' | 'lobby-join' | 'friend-game'
+  | 'pnp-lobby' | 'pnp-ban-x' | 'pnp-ban-o' | 'pnp-draft-x' | 'pnp-draft-o' | 'pnp-game';
 
 export type TurnPhase = 'normal' | 'haste-second' | 'redirect-pick' | 'momentum-bonus';

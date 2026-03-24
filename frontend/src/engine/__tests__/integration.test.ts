@@ -41,6 +41,7 @@ import {
   type PowerUpState,
   type PowerUpDraft,
   type SiegeThreat,
+  type ActiveCard,
 } from '../powerups';
 import {
   aiDecideCard,
@@ -1777,6 +1778,242 @@ describe('Winner validation — classic no-gambits stress', () => {
           updateGlobalState(game);
           expect(game.winner).toBe(savedWinner);
         }
+      }
+    }
+  });
+});
+
+// =====================================================================
+// Pass-and-Play (local PvP) simulation tests
+// =====================================================================
+
+describe('Pass-and-Play simulation', () => {
+  /**
+   * Simulate a local PvP turn: pick a random legal move, apply passives.
+   * Mirrors the logic in PassAndPlay.tsx's afterTurn.
+   */
+  function executePnPTurn(
+    game: HyperXOGame,
+    puState: PowerUpState | null,
+    siegeRef: { current: SiegeThreat[] },
+    opponentSiegeRef: { current: SiegeThreat[] },
+    doctrine: string | null,
+    opponentDoctrine: string | null,
+    opponentPlayer: Player,
+    cardUsedThisTurn: string | null,
+  ): { passives: string[]; move: [number, number] } {
+    const result: { passives: string[]; move: [number, number] } = { passives: [], move: [0, 0] };
+    const mover = game.currentPlayer;
+
+    // Pick random legal move
+    const moves = availableMoves(game);
+    expect(moves.length).toBeGreaterThan(0);
+    const move = moves[Math.floor(Math.random() * moves.length)];
+    result.move = move;
+
+    const prevWinners = game.boards.map(b => b.winner);
+    applyMove(game, move[0], move[1]);
+    checkZkey(game, `pnp-move-${mover}`);
+
+    if (game.winner || game.drawn) return result;
+
+    // Newly won boards
+    const newlyWon: { boardIdx: number; winner: Player }[] = [];
+    for (let i = 0; i < 9; i++) {
+      if (game.boards[i].winner && !prevWinners[i]) {
+        newlyWon.push({ boardIdx: i, winner: game.boards[i].winner! });
+      }
+    }
+    const moverWonBoard = newlyWon.some(w => w.winner === mover);
+
+    // Mover's siege refresh
+    if (doctrine === 'siege') {
+      siegeRef.current = refreshSiegeThreats(siegeRef.current, game, mover);
+    }
+
+    // Opponent's siege advance
+    if (opponentDoctrine === 'siege') {
+      const { updated, claimed } = advanceSiegeThreats(opponentSiegeRef.current, game, opponentPlayer);
+      opponentSiegeRef.current = updated;
+      for (const claim of claimed) {
+        if (game.winner || game.drawn) break;
+        result.passives.push(`siege-claim-${opponentPlayer}`);
+        applySiegeClaim(game, claim.boardIdx, claim.cellIdx, opponentPlayer);
+        checkZkey(game, `pnp-siege-claim-${opponentPlayer}`);
+      }
+      if (game.winner || game.drawn) return result;
+    }
+
+    // Mover's momentum
+    if (doctrine === 'momentum' && moverWonBoard && !game.winner && !game.drawn) {
+      result.passives.push('momentum');
+      game.currentPlayer = mover;
+      game.zkey ^= game.zobrist.stmKey();
+      checkZkey(game, `pnp-momentum-${mover}`);
+
+      // Bonus move
+      const bonusMoves = availableMoves(game);
+      if (bonusMoves.length > 0) {
+        const bonus = bonusMoves[Math.floor(Math.random() * bonusMoves.length)];
+        applyMove(game, bonus[0], bonus[1]);
+        checkZkey(game, `pnp-momentum-bonus-${mover}`);
+      }
+    }
+
+    if (game.winner || game.drawn) return result;
+
+    // Mover's arsenal
+    if (doctrine === 'arsenal' && puState) {
+      const wonByMe = newlyWon.some(w => w.winner === mover);
+      if (wonByMe) {
+        const recharged = rechargeRandomCard(puState, (cardUsedThisTurn ?? undefined) as ActiveCard | undefined);
+        if (recharged) result.passives.push(`arsenal-${mover}`);
+      }
+    }
+
+    return result;
+  }
+
+  it('two humans alternate turns until game ends (no gambits)', () => {
+    const modes: GameMode[] = ['classic', 'sudden-death', 'misere', 'conquest'];
+    for (const mode of modes) {
+      for (let trial = 0; trial < 5; trial++) {
+        const game = createGame(mode);
+        let turnCount = 0;
+        let lastPlayer: Player | null = null;
+
+        while (!game.winner && !game.drawn && turnCount < 200) {
+          // Verify turns alternate
+          if (lastPlayer !== null) {
+            expect(game.currentPlayer).not.toBe(lastPlayer);
+          }
+          lastPlayer = game.currentPlayer;
+
+          const moves = availableMoves(game);
+          expect(moves.length).toBeGreaterThan(0);
+          const move = moves[Math.floor(Math.random() * moves.length)];
+          applyMove(game, move[0], move[1]);
+          checkZkey(game, `pnp-turn-${turnCount}`);
+          turnCount++;
+        }
+
+        if (game.winner) {
+          const err = validateWinner(game);
+          expect(err).toBeNull();
+        }
+      }
+    }
+  });
+
+  it('passives fire correctly for each player in PnP', () => {
+    const draftX: PowerUpDraft = { strike: 'gravity', tactics: 'redirect', disruption: 'swap', doctrine: 'momentum' };
+    const draftO: PowerUpDraft = { strike: 'haste', tactics: 'recall', disruption: 'sabotage', doctrine: 'arsenal' };
+
+    for (let trial = 0; trial < 5; trial++) {
+      const game = createGame('classic');
+      const puX = createPowerUpState(draftX);
+      const puO = createPowerUpState(draftO);
+      const siegeX = { current: [] as SiegeThreat[] };
+      const siegeO = { current: [] as SiegeThreat[] };
+
+      for (let turn = 0; turn < 200; turn++) {
+        if (game.winner || game.drawn) break;
+
+        const isX = game.currentPlayer === 'X';
+        const pu = isX ? puX : puO;
+        const doctrine = isX ? draftX.doctrine : draftO.doctrine;
+        const oppDoctrine = isX ? draftO.doctrine : draftX.doctrine;
+        const oppPlayer = isX ? 'O' as Player : 'X' as Player;
+        const mySiege = isX ? siegeX : siegeO;
+        const oppSiege = isX ? siegeO : siegeX;
+
+        const result = executePnPTurn(game, pu, mySiege, oppSiege, doctrine, oppDoctrine, oppPlayer, null);
+
+        // If momentum triggered, verify it was the correct player
+        if (result.passives.includes('momentum')) {
+          expect(doctrine).toBe('momentum');
+        }
+
+        // Arsenal only triggers for the player with arsenal doctrine
+        for (const p of result.passives) {
+          if (p.startsWith('arsenal-')) {
+            const who = p.split('-')[1];
+            if (who === 'X') expect(draftX.doctrine).toBe('arsenal');
+            else expect(draftO.doctrine).toBe('arsenal');
+          }
+        }
+      }
+
+      if (game.winner) {
+        const err = validateWinner(game);
+        expect(err).toBeNull();
+      }
+    }
+  });
+
+  it('card activation works for both players in PnP', () => {
+    const game = createGame('classic');
+    const draftX: PowerUpDraft = { strike: 'overwrite', tactics: 'condemn', disruption: 'swap', doctrine: 'momentum' };
+    const draftO: PowerUpDraft = { strike: 'gravity', tactics: 'recall', disruption: 'sabotage', doctrine: 'arsenal' };
+    const puX = createPowerUpState(draftX);
+    const puO = createPowerUpState(draftO);
+
+    // X plays first
+    expect(game.currentPlayer).toBe('X');
+    const xMoves = availableMoves(game);
+    applyMove(game, xMoves[0][0], xMoves[0][1]);
+
+    // O plays
+    expect(game.currentPlayer).toBe('O');
+    const oMoves = availableMoves(game);
+    applyMove(game, oMoves[0][0], oMoves[0][1]);
+
+    // X uses overwrite on O's piece
+    expect(game.currentPlayer).toBe('X');
+    // Find O's piece to overwrite
+    let targetBoard = -1, targetCell = -1;
+    for (let bi = 0; bi < 9; bi++) {
+      for (let ci = 0; ci < 9; ci++) {
+        if (game.boards[bi].cells[ci] === 'O' && !game.boards[bi].winner && !game.boards[bi].drawn) {
+          targetBoard = bi;
+          targetCell = ci;
+          break;
+        }
+      }
+      if (targetBoard >= 0) break;
+    }
+    if (targetBoard >= 0) {
+      applyOverwrite(game, targetBoard, targetCell);
+      useCard(puX, 'overwrite');
+      checkZkey(game, 'pnp-overwrite');
+      expect(game.boards[targetBoard].cells[targetCell]).toBe('X');
+      expect(getAvailableCards(puX)).not.toContain('overwrite');
+    }
+
+    // Make some moves to get to O's turn
+    const xMoves2 = availableMoves(game);
+    if (xMoves2.length > 0) applyMove(game, xMoves2[0][0], xMoves2[0][1]);
+
+    // O uses sabotage on X's piece
+    if (!game.winner && !game.drawn) {
+      expect(game.currentPlayer).toBe('O');
+      let sTargetBoard = -1, sTargetCell = -1;
+      for (let bi = 0; bi < 9; bi++) {
+        for (let ci = 0; ci < 9; ci++) {
+          if (game.boards[bi].cells[ci] === 'X' && !game.boards[bi].condemned) {
+            sTargetBoard = bi;
+            sTargetCell = ci;
+            break;
+          }
+        }
+        if (sTargetBoard >= 0) break;
+      }
+      if (sTargetBoard >= 0) {
+        applySabotage(game, sTargetBoard, sTargetCell);
+        useCard(puO, 'sabotage');
+        checkZkey(game, 'pnp-sabotage');
+        expect(game.boards[sTargetBoard].cells[sTargetCell]).toBe('');
+        expect(getAvailableCards(puO)).not.toContain('sabotage');
       }
     }
   });

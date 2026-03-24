@@ -9,6 +9,8 @@ import DraftScreen from './components/DraftScreen';
 import GameView from './components/GameView';
 import Lobby from './components/Lobby';
 import FriendGame from './components/FriendGame';
+import PnPLobby from './components/PnPLobby';
+import PassAndPlay from './components/PassAndPlay';
 
 const FADE_MS = 120;
 
@@ -28,6 +30,14 @@ export default function App() {
   const [friendGambits, setFriendGambits] = useState(false);
   const [friendMode, setFriendMode] = useState<GameMode>('classic');
   const [friendBonusBoards, setFriendBonusBoards] = useState<number[] | undefined>(undefined);
+  // Pass & Play state
+  const [pnpNameX, setPnpNameX] = useState('');
+  const [pnpNameO, setPnpNameO] = useState('');
+  const [pnpBanX, setPnpBanX] = useState<PowerUpCard | null>(null);
+  const [pnpBanO, setPnpBanO] = useState<PowerUpCard | null>(null);
+  const [pnpDraftX, setPnpDraftX] = useState<PowerUpDraft | null>(null);
+  const [pnpDraftO, setPnpDraftO] = useState<PowerUpDraft | null>(null);
+  const [pnpPowerUps, setPnpPowerUps] = useState(false);
   const [fade, setFade] = useState(true);
   const transitioning = useRef(false);
 
@@ -50,6 +60,8 @@ export default function App() {
     []
   );
 
+  // ---- AI game flow ----
+
   const handleStartAI = useCallback(
     (d: Difficulty, sym: 'X' | 'O', name: string, mode: GameMode, powerUps: boolean) => {
       transitionTo(() => {
@@ -60,7 +72,6 @@ export default function App() {
         setPlayerDraft(null);
         setPlayerBan(null);
         if (powerUps) {
-          // Generate AI's ban independently (hidden until player also bans)
           setAiBanCard(generateAiBan(DIFFICULTY_PRESETS[d].depth, mode));
         } else {
           setAiBanCard(null);
@@ -91,6 +102,8 @@ export default function App() {
     [transitionTo]
   );
 
+  // ---- Friend (LAN) game flow ----
+
   const handleHostGame = useCallback((mode: GameMode) => {
     transitionTo(() => {
       setGameMode(mode);
@@ -118,18 +131,83 @@ export default function App() {
     [transitionTo]
   );
 
+  // ---- Pass & Play flow ----
+
+  const handleStartPnP = useCallback((mode: GameMode, powerUps: boolean) => {
+    transitionTo(() => {
+      setGameMode(mode);
+      setPnpPowerUps(powerUps);
+      setPnpBanX(null);
+      setPnpBanO(null);
+      setPnpDraftX(null);
+      setPnpDraftO(null);
+      setScreen('pnp-lobby');
+    });
+  }, [transitionTo]);
+
+  const handlePnPNames = useCallback((nx: string, no: string) => {
+    transitionTo(() => {
+      setPnpNameX(nx);
+      setPnpNameO(no);
+      setScreen(pnpPowerUps ? 'pnp-ban-x' : 'pnp-game');
+    });
+  }, [transitionTo, pnpPowerUps]);
+
+  const handlePnpBanX = useCallback((ban: PowerUpCard | null) => {
+    transitionTo(() => {
+      setPnpBanX(ban);
+      setScreen('pnp-ban-o');
+    });
+  }, [transitionTo]);
+
+  const handlePnpBanO = useCallback((ban: PowerUpCard | null) => {
+    transitionTo(() => {
+      setPnpBanO(ban);
+      setScreen('pnp-draft-x');
+    });
+  }, [transitionTo]);
+
+  const handlePnpDraftX = useCallback((draft: PowerUpDraft, _ban: PowerUpCard | null) => {
+    transitionTo(() => {
+      setPnpDraftX(draft);
+      setScreen('pnp-draft-o');
+    });
+  }, [transitionTo]);
+
+  const handlePnpDraftO = useCallback((draft: PowerUpDraft, _ban: PowerUpCard | null) => {
+    transitionTo(() => {
+      setPnpDraftO(draft);
+      setScreen('pnp-game');
+    });
+  }, [transitionTo]);
+
+  // ---- Navigation ----
+
   const goMenu = useCallback(() => {
     transitionTo(() => {
       friendWs?.close();
       setFriendWs(null);
       setMyName('');
       setOpponentName('');
+      setPnpNameX('');
+      setPnpNameO('');
+      setPnpBanX(null);
+      setPnpBanO(null);
+      setPnpDraftX(null);
+      setPnpDraftO(null);
       setScreen('menu');
       if (roomFromUrl) {
         window.history.replaceState({}, '', '/');
       }
     });
   }, [transitionTo, friendWs, roomFromUrl]);
+
+  const pnpBans = (() => {
+    const bans = new Set<string>();
+    if (pnpBanX) bans.add(pnpBanX);
+    if (pnpBanO) bans.add(pnpBanO);
+    return bans.size > 0 ? bans : undefined;
+  })();
 
   // Auto-join if room param in URL
   if (roomFromUrl && screen === 'menu') {
@@ -154,6 +232,7 @@ export default function App() {
         {screen === 'menu' && (
           <Menu
             onStartAI={handleStartAI}
+            onStartPnP={handleStartPnP}
             onHostGame={handleHostGame}
             onJoinGame={handleJoinGame}
           />
@@ -197,6 +276,39 @@ export default function App() {
             gambits={friendGambits}
             gameMode={friendMode}
             conquestBonusBoards={friendBonusBoards}
+            onBack={goMenu}
+          />
+        )}
+
+        {/* Pass & Play screens */}
+
+        {screen === 'pnp-lobby' && (
+          <PnPLobby onStart={handlePnPNames} onBack={goMenu} />
+        )}
+
+        {screen === 'pnp-ban-x' && (
+          <BanScreen playerLabel={pnpNameX} onBanReady={handlePnpBanX} onBack={goMenu} />
+        )}
+
+        {screen === 'pnp-ban-o' && (
+          <BanScreen playerLabel={pnpNameO} onBanReady={handlePnpBanO} onBack={goMenu} />
+        )}
+
+        {screen === 'pnp-draft-x' && (
+          <DraftScreen playerLabel={pnpNameX} onReady={handlePnpDraftX} onBack={goMenu} banned={pnpBans} />
+        )}
+
+        {screen === 'pnp-draft-o' && (
+          <DraftScreen playerLabel={pnpNameO} onReady={handlePnpDraftO} onBack={goMenu} banned={pnpBans} />
+        )}
+
+        {screen === 'pnp-game' && (
+          <PassAndPlay
+            mode={gameMode}
+            nameX={pnpNameX}
+            nameO={pnpNameO}
+            draftX={pnpDraftX}
+            draftO={pnpDraftO}
             onBack={goMenu}
           />
         )}

@@ -30,6 +30,7 @@ const MODE_DESCRIPTIONS: { id: string; label: string; color: string; desc: strin
 
 interface Props {
   onStartAI: (difficulty: Difficulty, symbol: 'X' | 'O', aiName: string, mode: GameMode, powerUps: boolean) => void;
+  onStartPnP: (mode: GameMode, powerUps: boolean) => void;
   onHostGame: (mode: GameMode) => void;
   onJoinGame: () => void;
 }
@@ -47,7 +48,7 @@ const DIFFICULTIES: { value: Difficulty; label: string; name: string; desc: stri
   { value: 8, label: 'Hard', name: 'Terminus', desc: 'Expert level', activeClass: 'bg-rose-500 text-white shadow-lg shadow-rose-500/25' },
 ];
 
-export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
+export default function Menu({ onStartAI, onStartPnP, onHostGame, onJoinGame }: Props) {
   const [mode, setMode] = useState<GameMode>('classic');
   const [difficulty, setDifficulty] = useState<Difficulty>(3);
   const [symbol, setSymbol] = useState<'X' | 'O'>('X');
@@ -196,35 +197,39 @@ export default function Menu({ onStartAI, onHostGame, onJoinGame }: Props) {
         </button>
       </div>
 
-      {!import.meta.env.VITE_PAGES && (
-        <>
-          {/* Divider */}
-          <div className="flex items-center gap-4 w-full max-w-lg">
-            <div className="flex-1 h-px bg-zinc-700" />
-            <span className="text-zinc-600 text-xs">or</span>
-            <div className="flex-1 h-px bg-zinc-700" />
-          </div>
+      {/* Divider */}
+      <div className="flex items-center gap-4 w-full max-w-lg">
+        <div className="flex-1 h-px bg-zinc-700" />
+        <span className="text-zinc-600 text-xs">or</span>
+        <div className="flex-1 h-px bg-zinc-700" />
+      </div>
 
-          {/* Friend Game */}
-          <div className="w-full max-w-lg flex flex-col gap-3">
-            <h2 className="text-zinc-300 text-lg font-medium text-center">Play with a Friend</h2>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => onHostGame(mode)}
-                className="rounded-xl border border-zinc-700 bg-zinc-800/50 px-6 py-2.5 text-zinc-300 font-semibold hover:bg-zinc-700/50 hover:border-zinc-600 transition-all active:scale-[0.98]"
-              >
-                Host Game
-              </button>
-              <button
-                onClick={onJoinGame}
-                className="rounded-xl border border-zinc-700 bg-zinc-800/50 px-6 py-2.5 text-zinc-300 font-semibold hover:bg-zinc-700/50 hover:border-zinc-600 transition-all active:scale-[0.98]"
-              >
-                Join Game
-              </button>
-            </div>
+      {/* Friend Game */}
+      <div className="w-full max-w-lg flex flex-col gap-3">
+        <h2 className="text-zinc-300 text-lg font-medium text-center">Play with a Friend</h2>
+        <button
+          onClick={() => onStartPnP(mode, powerUps)}
+          className="w-full rounded-xl border border-zinc-700 bg-zinc-800/50 px-6 py-2.5 text-zinc-300 font-semibold hover:bg-zinc-700/50 hover:border-zinc-600 transition-all active:scale-[0.98]"
+        >
+          Pass &amp; Play
+        </button>
+        {!import.meta.env.VITE_PAGES && (
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => onHostGame(mode)}
+              className="rounded-xl border border-zinc-700 bg-zinc-800/50 px-6 py-2.5 text-zinc-300 font-semibold hover:bg-zinc-700/50 hover:border-zinc-600 transition-all active:scale-[0.98]"
+            >
+              Host Game
+            </button>
+            <button
+              onClick={onJoinGame}
+              className="rounded-xl border border-zinc-700 bg-zinc-800/50 px-6 py-2.5 text-zinc-300 font-semibold hover:bg-zinc-700/50 hover:border-zinc-600 transition-all active:scale-[0.98]"
+            >
+              Join Game
+            </button>
           </div>
-        </>
-      )}
+        )}
+      </div>
 
       {/* How to Play Modal */}
       {rulesOpen && (

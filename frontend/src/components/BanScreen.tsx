@@ -9,12 +9,13 @@ import {
 interface Props {
   onBanReady: (ban: PowerUpCard | null) => void;
   onBack: () => void;
+  playerLabel?: string;
 }
 
 const ACTIVE_CATS = CATEGORIES.filter(cat => cat.key !== 'doctrine');
 const PASSIVE_CATS = CATEGORIES.filter(cat => cat.key === 'doctrine');
 
-export default function BanScreen({ onBanReady, onBack }: Props) {
+export default function BanScreen({ onBanReady, onBack, playerLabel }: Props) {
   const [ban, setBan] = useState<PowerUpCard | null>(null);
 
   const renderCard = (cardId: PowerUpCard) => {
@@ -51,7 +52,7 @@ export default function BanScreen({ onBanReady, onBack }: Props) {
         <button onClick={onBack} className="text-zinc-500 hover:text-zinc-300 text-sm transition-colors">
           &larr; Back
         </button>
-        <h2 className="text-zinc-200 text-lg font-semibold">Ban Phase</h2>
+        <h2 className="text-zinc-200 text-lg font-semibold">{playerLabel ? `${playerLabel} — Ban` : 'Ban Phase'}</h2>
         <div className="w-12" />
       </div>
       <p className="text-zinc-500 text-sm">Ban one card to remove it from both players' draft pools, or skip.</p>

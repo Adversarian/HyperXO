@@ -17,6 +17,7 @@ interface Props {
   onBack: () => void;
   /** Cards already banned (e.g. by opponent in PvP). Hidden from the draft pool. */
   banned?: Set<string>;
+  playerLabel?: string;
 }
 
 type Phase = 'ban' | 'draft';
@@ -46,7 +47,7 @@ function PassiveDivider() {
   );
 }
 
-export default function DraftScreen({ onReady, onBack, banned: externalBans }: Props) {
+export default function DraftScreen({ onReady, onBack, banned: externalBans, playerLabel }: Props) {
   // Skip ban phase if external bans were already provided (PvP flow)
   const [phase, setPhase] = useState<Phase>(externalBans ? 'draft' : 'ban');
   const [myBan, setMyBan] = useState<PowerUpCard | null>(null);
@@ -202,7 +203,7 @@ export default function DraftScreen({ onReady, onBack, banned: externalBans }: P
         <button onClick={externalBans ? onBack : () => { setPhase('ban'); setPicks({}); }} className="text-zinc-500 hover:text-zinc-300 text-sm transition-colors">
           &larr; {externalBans ? 'Back' : 'Back to Ban'}
         </button>
-        <h2 className="text-zinc-200 text-lg font-semibold">Draft Your Gambits</h2>
+        <h2 className="text-zinc-200 text-lg font-semibold">{playerLabel ? `${playerLabel} — Draft` : 'Draft Your Gambits'}</h2>
         <div className="w-12" />
       </div>
       <div className="flex items-center gap-3">
