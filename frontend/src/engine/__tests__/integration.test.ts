@@ -31,6 +31,7 @@ import {
   applyShatter,
   applyCondemn,
   applyRedirect,
+  applyGravity,
   applySiegeClaim,
   refreshSiegeThreats,
   advanceSiegeThreats,
@@ -128,29 +129,6 @@ function executeAiTurn(game: HyperXOGame, player: SimPlayer, opponent: SimPlayer
     useCard(player.puState, cardDecision.card);
 
     switch (cardDecision.card) {
-      case 'double-down': {
-        // Place a second piece on the same board using applyMove for correct Zobrist
-        const board = game.boards[move[0]];
-        if (!board.winner && !board.drawn && !board.condemned) {
-          // Switch back to AI's turn
-          game.currentPlayer = player.ai.player;
-          game.zkey ^= game.zobrist.stmKey();
-          // Force to same board
-          game.zkey ^= game.zobrist.nbiKey(game.nextBoardIndex);
-          game.nextBoardIndex = move[0];
-          game.zkey ^= game.zobrist.nbiKey(move[0]);
-          checkZkey(game, 'DD: after switch+force');
-
-          player.ai.tt.clear();
-          const ddMoves = availableMoves(game);
-          if (ddMoves.length > 0) {
-            const ddMove = choose(player.ai, game);
-            applyMove(game, ddMove[0], ddMove[1]);
-            checkZkey(game, 'DD: after second applyMove');
-          }
-        }
-        break;
-      }
       case 'haste': {
         // AI gets a second full turn
         if (!game.winner && !game.drawn) {
@@ -494,12 +472,12 @@ describe('Full game simulation - Classic mode', () => {
     expect(result.winner !== null || result.drawn).toBe(true);
   });
 
-  it('completes a full game with double-down + siege', () => {
+  it('completes a full game with gravity + siege', () => {
     const result = simulateFullGame({
       mode: 'classic',
       xDifficulty: 3,
       oDifficulty: 3,
-      xDraft: { strike: 'double-down', tactics: 'recall', disruption: 'swap', doctrine: 'siege' },
+      xDraft: { strike: 'gravity', tactics: 'recall', disruption: 'swap', doctrine: 'siege' },
       oDraft: { strike: 'overwrite', tactics: 'redirect', disruption: 'sabotage', doctrine: 'momentum' },
     });
 
@@ -555,7 +533,7 @@ describe('Full game simulation - Misere mode', () => {
       mode: 'misere',
       xDifficulty: 3,
       oDifficulty: 3,
-      xDraft: { strike: 'double-down', tactics: 'recall', disruption: 'swap', doctrine: 'siege' },
+      xDraft: { strike: 'gravity', tactics: 'recall', disruption: 'swap', doctrine: 'siege' },
       oDraft: { strike: 'overwrite', tactics: 'condemn', disruption: 'swap', doctrine: 'momentum' },
     });
 
@@ -1034,12 +1012,12 @@ describe('Stress tests', () => {
       { strike: 'haste', tactics: 'condemn', disruption: 'sabotage', doctrine: 'arsenal' },
     ],
     [
-      { strike: 'double-down', tactics: 'recall', disruption: 'swap', doctrine: 'siege' },
+      { strike: 'gravity', tactics: 'recall', disruption: 'swap', doctrine: 'siege' },
       { strike: 'overwrite', tactics: 'redirect', disruption: 'sabotage', doctrine: 'momentum' },
     ],
     [
       { strike: 'haste', tactics: 'recall', disruption: 'shatter', doctrine: 'arsenal' },
-      { strike: 'double-down', tactics: 'condemn', disruption: 'swap', doctrine: 'siege' },
+      { strike: 'gravity', tactics: 'condemn', disruption: 'swap', doctrine: 'siege' },
     ],
   ];
 
@@ -1157,6 +1135,29 @@ describe('Zobrist key integrity', () => {
     expect(game.zkey).toBe(recomputeZkey(game));
   });
 
+  it('zkey matches after applyGravity', () => {
+    const game = createGame();
+    game.boards[0].cells = ['X', 'O', '', '', 'X', '', '', '', 'O'];
+    game.currentPlayer = 'X';
+    game.zkey = recomputeZkey(game);
+
+    applyGravity(game, 0);
+    expect(game.zkey).toBe(recomputeZkey(game));
+  });
+
+  it('zkey matches after applyGravity with overlapping sources and destinations', () => {
+    const game = createGame();
+    // Col 0: X at 0, O at 3 → X moves to 3, O moves to 6 (3 is both source and destination)
+    game.boards[0].cells = ['X', '', '', 'O', '', '', '', '', ''];
+    game.currentPlayer = 'X';
+    game.zkey = recomputeZkey(game);
+
+    applyGravity(game, 0);
+    expect(game.zkey).toBe(recomputeZkey(game));
+    expect(game.boards[0].cells[3]).toBe('X');
+    expect(game.boards[0].cells[6]).toBe('O');
+  });
+
   it('zkey matches after full game simulation', () => {
     const result = simulateFullGame({
       mode: 'classic',
@@ -1225,28 +1226,19 @@ describe('Player turn correctness', () => {
     }
   });
 
-  it('double-down does not give extra turns', () => {
+  it('gravity does not change turn order', () => {
     const game = createGame();
-    game.boards[4].cells = ['', '', '', '', '', '', '', '', ''];
-    game.nextBoardIndex = 4;
+    // Set up a board where gravity would move pieces
+    game.boards[4].cells = ['X', 'O', '', '', '', '', '', '', ''];
     game.currentPlayer = 'X';
 
-    // X plays normally
-    applyMove(game, 4, 0);
+    applyGravity(game, 4);
 
-    // Double-down: place second piece on same board (manual placement, no applyMove)
-    const board = game.boards[4];
-    if (!board.winner && !board.drawn) {
-      board.cells[4] = 'X';
-      game.zkey ^= game.zobrist.pieceKey(4, 4, 'X');
-      recalcBoard(board);
-      updateGlobalState(game);
-    }
-
-    // Should still be O's turn (applyMove already switched)
-    if (!game.winner && !game.drawn) {
-      expect(game.currentPlayer).toBe('O');
-    }
+    // Gravity is a pre-placement card — doesn't switch turns
+    expect(game.currentPlayer).toBe('X');
+    // Pieces should have fallen
+    expect(game.boards[4].cells[6]).toBe('X');
+    expect(game.boards[4].cells[7]).toBe('O');
   });
 
   it('players alternate correctly through full simulation', () => {
@@ -1654,7 +1646,7 @@ describe('Mode stress tests', () => {
   const MODES: GameMode[] = ['classic', 'sudden-death', 'misere'];
   // One representative matchup per mode — covers all three doctrines
   const xDraft: PowerUpDraft = { strike: 'haste', tactics: 'redirect', disruption: 'shatter', doctrine: 'momentum' };
-  const oDraft: PowerUpDraft = { strike: 'double-down', tactics: 'recall', disruption: 'swap', doctrine: 'siege' };
+  const oDraft: PowerUpDraft = { strike: 'gravity', tactics: 'recall', disruption: 'swap', doctrine: 'siege' };
 
   for (const mode of MODES) {
     it(`${mode}: full game with gambits`, () => {

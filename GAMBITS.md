@@ -24,7 +24,7 @@ Total possible loadouts: 3 x 3 x 3 x 3 = **81**.
 
 | Card | Effect |
 |------|--------|
-| **Double Down** | Place two pieces on the same board this turn. Both follow normal placement rules (empty cells only). The second piece determines the opponent's directed board. |
+| **Gravity** | Before placing, choose a live board. All pieces on that board fall to the bottom of their columns (Connect 4 style). May create new winning lines or break existing threats. |
 | **Haste** | Take two consecutive turns. After placing your first piece and being directed, immediately take another full turn before your opponent plays. |
 | **Overwrite** | Before placing, replace one opponent piece on any live board with your own. The overwritten cell now belongs to you. Then place your normal piece as usual. |
 
@@ -54,7 +54,7 @@ Total possible loadouts: 3 x 3 x 3 x 3 = **81**.
 
 ## Balance notes
 
-- **Counter-drafting is natural.** Opponent picks Double Down? Shatter their
+- **Counter-drafting is natural.** Opponent picks Gravity? Shatter their
   target board. Opponent picks Redirect? Recall repositions around the trap.
   Opponent picks Haste? Swap flips what they built.
 - **Categories ensure variety.** You always have one offensive, one tactical,
@@ -85,7 +85,7 @@ card timing:
 
 2. **Simulation-based card valuation** — before each AI turn, every available
    card is evaluated by simulating its effect and measuring position improvement
-   via `evaluateForPlayer`. Flow modifiers (double-down, haste, redirect) are
+   via `evaluateForPlayer`. Flow modifiers (haste, redirect) are
    evaluated by simulating the actual move sequences they enable.
 
 3. **Urgency system** — raw card values are multiplied by a situational urgency

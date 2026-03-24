@@ -34,4 +34,4 @@ export type GameMode = 'classic' | 'sudden-death' | 'misere' | 'conquest';
 
 export type Screen = 'menu' | 'ban' | 'draft' | 'game' | 'lobby-create' | 'lobby-join' | 'friend-game';
 
-export type TurnPhase = 'normal' | 'dd-second' | 'haste-second' | 'redirect-pick' | 'momentum-bonus';
+export type TurnPhase = 'normal' | 'haste-second' | 'redirect-pick' | 'momentum-bonus';

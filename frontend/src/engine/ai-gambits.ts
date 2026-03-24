@@ -7,8 +7,6 @@ import {
   captureUndo,
   undoMove,
   bigBoardState,
-  recalcBoard,
-  updateGlobalState,
 } from './game';
 import {
   type PowerUpDraft,
@@ -27,6 +25,7 @@ import {
   applySwap,
   applyShatter,
   applyCondemn,
+  applyGravity,
 } from './powerups';
 import { evaluateForPlayer, choose, createAI } from './ai';
 import { computeConquestScores } from './game';
@@ -103,22 +102,22 @@ function filterBanned<T extends string>(
 // Used by AI to decide what to ban.
 const CARD_THREAT_CLASSIC: Record<string, number> = {
   'haste': 8, 'overwrite': 7, 'sabotage': 6, 'shatter': 6,
-  'redirect': 5, 'double-down': 5, 'momentum': 5, 'arsenal': 5,
+  'gravity': 5, 'redirect': 5, 'momentum': 5, 'arsenal': 5,
   'condemn': 4, 'recall': 4, 'swap': 4, 'siege': 3,
 };
 const CARD_THREAT_SUDDEN_DEATH: Record<string, number> = {
-  'haste': 10, 'overwrite': 9, 'double-down': 8, 'sabotage': 7,
+  'haste': 10, 'overwrite': 9, 'sabotage': 7, 'gravity': 7,
   'shatter': 7, 'redirect': 4, 'momentum': 4, 'arsenal': 4,
   'condemn': 3, 'recall': 3, 'swap': 3, 'siege': 2,
 };
 const CARD_THREAT_MISERE: Record<string, number> = {
   'swap': 9, 'condemn': 7, 'shatter': 7, 'sabotage': 6,
-  'overwrite': 5, 'redirect': 5, 'arsenal': 5, 'momentum': 4,
-  'recall': 4, 'haste': 3, 'double-down': 3, 'siege': 3,
+  'gravity': 5, 'overwrite': 5, 'redirect': 5, 'arsenal': 5,
+  'momentum': 4, 'recall': 4, 'haste': 3, 'siege': 3,
 };
 const CARD_THREAT_CONQUEST: Record<string, number> = {
   'shatter': 9, 'haste': 8, 'overwrite': 7, 'sabotage': 7,
-  'condemn': 6, 'momentum': 6, 'double-down': 5, 'arsenal': 5,
+  'gravity': 6, 'condemn': 6, 'momentum': 6, 'arsenal': 5,
   'redirect': 4, 'swap': 4, 'recall': 4, 'siege': 3,
 };
 
@@ -171,10 +170,10 @@ export function aiDraft(difficulty: number, banned?: Set<string>): PowerUpDraft 
     };
   }
 
-  // Card order: [double-down, haste, overwrite], [redirect, recall, condemn],
+  // Card order: [gravity, haste, overwrite], [redirect, recall, condemn],
   //             [swap, shatter, sabotage], [momentum, siege, arsenal]
   const isHard = difficulty > 5;
-  const s = filterBanned(STRIKE_CARDS, isHard ? [1, 3, 4] : [2, 3, 3], b);
+  const s = filterBanned(STRIKE_CARDS, isHard ? [2, 3, 4] : [3, 3, 3], b);
   const t = filterBanned(TACTICS_CARDS, isHard ? [4, 2, 2] : [3, 2, 2], b);
   const d = filterBanned(DISRUPTION_CARDS, isHard ? [1, 2, 4] : [2, 2, 3], b);
   const o = filterBanned(DOCTRINE_CARDS, isHard ? [4, 1, 3] : [3, 1, 3], b);
@@ -377,48 +376,36 @@ function bestMoveShallow(game: HyperXOGame, player: Player): [number, number, nu
 }
 
 /**
- * Double Down: simulate placing two pieces on the same board.
- * Try all valid boards, pick best two cells, measure real improvement.
+ * Gravity: simulate applying gravity on each live board.
+ * Measure position improvement after pieces fall.
  */
-function evalDoubleDown(game: HyperXOGame, aiPlayer: Player, baseScore: number): number {
+function evalGravity(game: HyperXOGame, aiPlayer: Player, baseScore: number): { improvement: number; boardIdx: number } | null {
   const snap = snapshot(game);
   let bestImprovement = 0;
+  let bestBoard = -1;
 
   for (let bi = 0; bi < 9; bi++) {
     const b = game.boards[bi];
     if (b.condemned || b.winner || b.drawn) continue;
-    if (game.nextBoardIndex !== null && game.nextBoardIndex !== bi) continue;
+    if (!b.cells.some(c => c !== '')) continue;
 
-    const emptyCells: number[] = [];
-    for (let ci = 0; ci < 9; ci++) {
-      if (b.cells[ci] === '') emptyCells.push(ci);
+    try {
+      applyGravity(game, bi);
+    } catch {
+      restore(game, snap);
+      continue;
     }
-    if (emptyCells.length < 2) continue;
 
-    // Try all pairs of empty cells on this board
-    for (let i = 0; i < emptyCells.length; i++) {
-      for (let j = i + 1; j < emptyCells.length; j++) {
-        const c1 = emptyCells[i], c2 = emptyCells[j];
-
-        // Simulate: place both pieces (manually to avoid player switching)
-        game.boards[bi].cells[c1] = aiPlayer;
-        game.zkey ^= game.zobrist.pieceKey(bi, c1, aiPlayer);
-        game.boards[bi].cells[c2] = aiPlayer;
-        game.zkey ^= game.zobrist.pieceKey(bi, c2, aiPlayer);
-
-        // Recalc board state after both placements
-        recalcBoard(game.boards[bi]);
-        updateGlobalState(game);
-
-        const improvement = evaluateForPlayer(game, aiPlayer) - baseScore;
-        bestImprovement = Math.max(bestImprovement, improvement);
-
-        restore(game, snap);
-      }
+    const improvement = evaluateForPlayer(game, aiPlayer) - baseScore;
+    if (improvement > bestImprovement) {
+      bestImprovement = improvement;
+      bestBoard = bi;
     }
+
+    restore(game, snap);
   }
 
-  return bestImprovement;
+  return bestBoard >= 0 ? { improvement: bestImprovement, boardIdx: bestBoard } : null;
 }
 
 /**
@@ -519,7 +506,7 @@ function evalRedirect(game: HyperXOGame, aiPlayer: Player, _baseScore: number): 
 // ---- Main card decision function ----
 
 const PRE_PLACEMENT_CARDS = new Set<ActiveCard>([
-  'overwrite', 'sabotage', 'recall', 'swap', 'shatter', 'condemn',
+  'overwrite', 'sabotage', 'recall', 'swap', 'shatter', 'condemn', 'gravity',
 ]);
 
 export function isPrePlacementCard(card: ActiveCard): boolean {
@@ -733,9 +720,9 @@ export function aiDecideCard(
         if (r) { rawValue = r.improvement; decision = { card, boardIdx: r.boardIdx }; }
         break;
       }
-      case 'double-down': {
-        rawValue = evalDoubleDown(game, aiPlayer, baseScore);
-        if (rawValue > 0) decision = { card };
+      case 'gravity': {
+        const r = evalGravity(game, aiPlayer, baseScore);
+        if (r) { rawValue = r.improvement; decision = { card, boardIdx: r.boardIdx }; }
         break;
       }
       case 'haste': {
@@ -870,6 +857,9 @@ export function applyAiPreCard(game: HyperXOGame, decision: AiCardDecision): voi
     case 'condemn':
       applyCondemn(game, decision.boardIdx!);
       break;
+    case 'gravity':
+      applyGravity(game, decision.boardIdx!);
+      break;
   }
 }
 
@@ -881,6 +871,7 @@ export function getCardFlashBoards(decision: AiCardDecision): number[] {
     case 'swap':
     case 'shatter':
     case 'condemn':
+    case 'gravity':
       return [decision.boardIdx!];
     case 'recall':
       return [decision.fromBoard!, decision.toBoard!];

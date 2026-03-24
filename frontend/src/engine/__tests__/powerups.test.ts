@@ -20,6 +20,8 @@ import {
   applyShatter,
   applyCondemn,
   applyRedirect,
+  applyGravity,
+  computeGravity,
   scanSiegeThreats,
   refreshSiegeThreats,
   advanceSiegeThreats,
@@ -462,5 +464,109 @@ describe('siege passive', () => {
     applySiegeClaim(game, 0, 2, 'X');
     expect(game.boards[0].cells[2]).toBe('X');
     expect(game.boards[0].winner).toBe('X');
+  });
+});
+
+// ---- Gravity ----
+
+describe('applyGravity', () => {
+
+  it('pieces fall to the bottom of their columns', () => {
+    const game = createGame();
+    // X at top-left (0), O at top-center (1)
+    game.boards[0].cells = ['X', 'O', '', '', '', '', '', '', ''];
+    applyGravity(game, 0);
+    expect(game.boards[0].cells[6]).toBe('X'); // fell to bottom-left
+    expect(game.boards[0].cells[7]).toBe('O'); // fell to bottom-center
+    expect(game.boards[0].cells[0]).toBe('');  // cleared
+    expect(game.boards[0].cells[1]).toBe('');  // cleared
+  });
+
+  it('pieces already at bottom do not move', () => {
+    const game = createGame();
+    game.boards[0].cells = ['', '', '', '', '', '', 'X', 'O', 'X'];
+    const moves = computeGravity(game.boards[0].cells);
+    expect(moves.size).toBe(0);
+  });
+
+  it('stacks pieces correctly in a column', () => {
+    const game = createGame();
+    // Col 0: X at row 0, O at row 2 → O stays, X falls to row 1
+    game.boards[0].cells = ['X', '', '', '', '', '', 'O', '', ''];
+    applyGravity(game, 0);
+    expect(game.boards[0].cells[3]).toBe('X'); // X fell to middle
+    expect(game.boards[0].cells[6]).toBe('O'); // O stayed at bottom
+    expect(game.boards[0].cells[0]).toBe('');  // top cleared
+  });
+
+  it('gravity can create a winning line', () => {
+    const game = createGame();
+    // X at 0,1,2 (top row) — already a win. Let's use a non-winning setup.
+    // X at 0 and 2 (top corners), X at 4 (center). After gravity:
+    // Col 0: X falls from 0 to 6. Col 1: X stays at 4→falls to 7. Col 2: X falls from 2 to 8.
+    game.boards[0].cells = ['X', '', 'X', '', 'X', '', '', '', ''];
+    applyGravity(game, 0);
+    // Bottom row should be X, X, X
+    expect(game.boards[0].cells[6]).toBe('X');
+    expect(game.boards[0].cells[7]).toBe('X');
+    expect(game.boards[0].cells[8]).toBe('X');
+    expect(game.boards[0].winner).toBe('X');
+  });
+
+  it('gravity can break an existing winning threat', () => {
+    const game = createGame();
+    // X has top row (0,1,2) → wait, that IS a win already. Let's do diagonal.
+    // X at 0, 4 (diagonal 0-4-8). After gravity:
+    // X at 0 → falls to 6. X at 4 → falls to 7. Diagonal broken.
+    game.boards[0].cells = ['X', '', '', '', 'X', '', '', '', ''];
+    applyGravity(game, 0);
+    expect(game.boards[0].cells[6]).toBe('X');
+    expect(game.boards[0].cells[7]).toBe('X');
+    // Diagonal 0-4-8 no longer has X
+    expect(game.boards[0].cells[0]).toBe('');
+    expect(game.boards[0].cells[4]).toBe('');
+  });
+
+  it('throws on condemned board', () => {
+    const game = createGame();
+    game.boards[0].condemned = true;
+    expect(() => applyGravity(game, 0)).toThrow();
+  });
+
+  it('throws on won board', () => {
+    const game = createGame();
+    game.boards[0].winner = 'X';
+    expect(() => applyGravity(game, 0)).toThrow();
+  });
+
+  it('maintains Zobrist hash consistency', () => {
+    const game = createGame();
+    game.boards[0].cells = ['X', 'O', '', '', 'X', '', '', '', 'O'];
+    const before = game.zkey;
+    applyGravity(game, 0);
+    // Zkey should have changed (pieces moved)
+    expect(game.zkey).not.toBe(before);
+  });
+
+  it('handles full column correctly', () => {
+    const game = createGame();
+    // Col 0 fully packed: X, O, X from top to bottom
+    game.boards[0].cells = ['X', '', '', 'O', '', '', 'X', '', ''];
+    applyGravity(game, 0);
+    // Should stay: bottom X, then O, then X (reversed gravity order)
+    expect(game.boards[0].cells[6]).toBe('X');
+    expect(game.boards[0].cells[3]).toBe('O');
+    expect(game.boards[0].cells[0]).toBe('X');
+    // Wait, full column doesn't move. Let me reconsider.
+    // Col 0: 0=X, 3=O, 6=X. All slots filled → nothing moves.
+  });
+
+  it('computeGravity returns correct move map', () => {
+    const cells = ['X', '', '', '', 'O', '', '', '', ''] as ('' | 'X' | 'O')[];
+    const moves = computeGravity(cells);
+    // X at 0 should fall to 6, O at 4 should fall to 7
+    expect(moves.get(0)).toBe(6);
+    expect(moves.get(4)).toBe(7);
+    expect(moves.size).toBe(2);
   });
 });

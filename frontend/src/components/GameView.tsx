@@ -13,6 +13,8 @@ import {
   applyShatter,
   applyCondemn,
   applyRedirect,
+  applyGravity,
+  computeGravity,
   refreshSiegeThreats,
   advanceSiegeThreats,
   applySiegeClaim,
@@ -96,6 +98,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   const [recallSource, setRecallSource] = useState<{ boardIdx: number; cellIdx: number } | null>(null);
   const [aiPUDisplay, setAiPUDisplay] = useState<PowerUpState | null>(null);
   const [combatLog, setCombatLog] = useState<LogEntry[]>([]);
+  const [gravityAnimation, setGravityAnimation] = useState<{ boardIdx: number; moves: Map<number, number> } | null>(null);
   const flashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const engineRef = useRef<HyperXOGame | null>(null);
   const aiRef = useRef<MinimaxAI | null>(null);
@@ -140,6 +143,13 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   useEffect(() => {
     return () => { if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current); };
   }, []);
+
+  // Clear gravity animation after it plays
+  useEffect(() => {
+    if (!gravityAnimation) return;
+    const t = setTimeout(() => setGravityAnimation(null), 500);
+    return () => clearTimeout(t);
+  }, [gravityAnimation]);
 
   const updateSiege = useCallback((threats: SiegeThreat[]) => {
     siegeRef.current = threats;
@@ -301,6 +311,11 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       if (isPrePlacementCard(cardDecision.card)) {
         // Pre-placement card: apply with delay for visual feedback
         preCardWinners = engine.boards.map(b => b.winner);
+        // Pre-compute gravity moves for animation before state changes
+        let aiGravityMoves: Map<number, number> | undefined;
+        if (cardDecision.card === 'gravity' && cardDecision.boardIdx !== undefined) {
+          aiGravityMoves = computeGravity(engine.boards[cardDecision.boardIdx].cells as ('' | 'X' | 'O')[]);
+        }
         try { applyAiPreCard(engine, cardDecision); } catch (e) {
           console.error('AI pre-card error:', e);
           preCardWinners = null;
@@ -315,6 +330,9 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
           const flashC = getCardFlashColor(cardDecision.card);
           logEvent(`${aiName} used ${CARD_CATALOG[cardDecision.card].name}!`, 'text-indigo-400');
           if (flashB.length > 0) triggerFlash(flashB, flashC);
+          if (aiGravityMoves && aiGravityMoves.size > 0 && cardDecision.boardIdx !== undefined) {
+            setGravityAnimation({ boardIdx: cardDecision.boardIdx, moves: aiGravityMoves });
+          }
           setGame(toGameState(engine));
 
           // Delay before normal move
@@ -366,19 +384,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     const move = choose(ai, engine);
     applyMove(engine, move[0], move[1]);
     const lastMove = { player: aiSymbol, boardIndex: move[0], cellIndex: move[1] };
-
-    // Double-down: second piece on same board
-    if (flowCard === 'double-down' && !engine.winner && !engine.drawn && isBoardLive(engine, move[0])) {
-      engine.currentPlayer = aiSymbol as Player;
-      engine.zkey ^= engine.zobrist.stmKey();
-      engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-      engine.nextBoardIndex = move[0];
-      engine.zkey ^= engine.zobrist.nbiKey(move[0]);
-      ai.tt.clear(); // TT is stale after manual player/nbi switch
-      const move2 = choose(ai, engine);
-      applyMove(engine, move2[0], move2[1]);
-    }
-    // If DD fizzled (board won by first piece), just proceed normally
 
     // Redirect: pick target after placement
     if (flowCard === 'redirect' && !engine.winner && !engine.drawn) {
@@ -489,6 +494,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     setCardUsedThisTurn(null);
     setRecallSource(null);
     setTurnPhase('normal');
+    setGravityAnimation(null);
     updateSiege([]);
     setCombatLog([]);
 
@@ -559,17 +565,21 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         const card = activatingCard;
 
         // Board-target cards (pre-placement)
-        if (card === 'condemn' || card === 'swap' || card === 'shatter') {
+        if (card === 'condemn' || card === 'swap' || card === 'shatter' || card === 'gravity') {
           try {
             preCardWinnersRef.current = engine.boards.map(b => b.winner);
             if (card === 'condemn') applyCondemn(engine, boardIndex);
             else if (card === 'swap') applySwap(engine, boardIndex);
+            else if (card === 'gravity') {
+              const gravityMoves = applyGravity(engine, boardIndex);
+              setGravityAnimation({ boardIdx: boardIndex, moves: gravityMoves });
+            }
             else applyShatter(engine, boardIndex);
             commitCard(card);
             logEvent(`You used ${CARD_CATALOG[card].name}!`, 'text-cyan-400');
             if (engine.winner || engine.drawn) preCardWinnersRef.current = null;
             refreshGame();
-            triggerFlash([boardIndex], card === 'swap' ? 'violet' : card === 'shatter' ? 'rose' : 'zinc');
+            triggerFlash([boardIndex], card === 'swap' ? 'violet' : card === 'shatter' ? 'rose' : card === 'gravity' ? 'amber' : 'zinc');
           } catch { /* invalid target, ignore */ }
           return;
         }
@@ -644,7 +654,7 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         return;
       }
 
-      // --- Normal / DD-second / Haste-second placement ---
+      // --- Normal / Haste-second placement ---
       if (aiThinking) return;
       if (turnPhase === 'normal' && engine.currentPlayer !== playerSymbol) return;
       const legal = availableMoves(engine).some(([b, c]) => b === boardIndex && c === cellIndex);
@@ -656,13 +666,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       applyMove(engine, boardIndex, cellIndex);
       const lastMove = { player: engine.currentPlayer === 'X' ? 'O' : 'X', boardIndex, cellIndex };
 
-      // DD-second: done, check passives then AI responds
-      if (turnPhase === 'dd-second') {
-        setTurnPhase('normal');
-        afterPlayerTurn(engine, lastMove, prevWinners);
-        return;
-      }
-
       // Haste-second: done, check passives then AI responds
       if (turnPhase === 'haste-second') {
         setTurnPhase('normal');
@@ -671,27 +674,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       }
 
       // --- Check for pending flow-modifier cards ---
-
-      if (activatingCard === 'double-down' && !engine.winner && !engine.drawn) {
-        const boardLive = isBoardLive(engine, boardIndex);
-        // Undo player switch, force to same board for second piece
-        engine.currentPlayer = playerSymbol as Player;
-        engine.zkey ^= engine.zobrist.stmKey();
-        if (boardLive) {
-          engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-          engine.nextBoardIndex = boardIndex;
-          engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-          commitCard('double-down');
-          logEvent('You used Double Down!', 'text-cyan-400');
-          setTurnPhase('dd-second');
-          setGame(toGameState(engine, lastMove));
-          return;
-        }
-        // Board no longer live (first piece won it), just proceed normally
-        engine.currentPlayer = engine.currentPlayer === 'X' ? 'O' : 'X';
-        engine.zkey ^= engine.zobrist.stmKey();
-        commitCard('double-down');
-      }
 
       if (activatingCard === 'haste' && !engine.winner && !engine.drawn) {
         commitCard('haste');
@@ -761,7 +743,9 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
         if (b.condemned) continue;
         if (activatingCard === 'condemn' && (b.winner || b.drawn)) continue;
         if (activatingCard === 'swap' && (b.winner || b.drawn)) continue;
+        if (activatingCard === 'gravity' && (b.winner || b.drawn)) continue;
         if ((activatingCard === 'swap' || activatingCard === 'shatter') && !b.cells.some(c => c !== '')) continue;
+        if (activatingCard === 'gravity' && computeGravity(b.cells as ('' | 'X' | 'O')[]).size === 0) continue;
         validBoards.add(i);
       }
       return { mode: 'board' as const, validBoards };
@@ -797,11 +781,9 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
   const aiLabel = { turn: `${aiName}'s turn`, win: `${aiName} wins` };
 
   const phaseHint =
-    turnPhase === 'dd-second'
-      ? { label: 'Double Down', desc: 'Place your second piece on the same board' }
-      : turnPhase === 'haste-second'
-        ? { label: 'Haste', desc: 'Take your second consecutive turn' }
-        : turnPhase === 'redirect-pick'
+    turnPhase === 'haste-second'
+      ? { label: 'Haste', desc: 'Take your second consecutive turn' }
+      : turnPhase === 'redirect-pick'
           ? { label: 'Redirect', desc: 'Click a board to send your opponent there' }
           : turnPhase === 'momentum-bonus'
             ? { label: 'Momentum', desc: 'You won a board — take a bonus turn!' }
@@ -890,6 +872,8 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
             flashBoards={flashBoards.size > 0 ? flashBoards : undefined}
             siegeCells={siegeCellsMap}
             conquestBonusBoards={game.conquestBonusBoards ? new Set(game.conquestBonusBoards) : undefined}
+            gravityMoves={gravityAnimation?.moves}
+            gravityBoardIdx={gravityAnimation?.boardIdx}
           />
           {hasGambits && <CombatLog entries={combatLog} />}
         </div>

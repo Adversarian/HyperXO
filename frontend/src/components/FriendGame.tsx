@@ -12,6 +12,8 @@ import {
   applyShatter,
   applyCondemn,
   applyRedirect,
+  applyGravity,
+  computeGravity,
   refreshSiegeThreats,
   advanceSiegeThreats,
   applySiegeClaim,
@@ -66,6 +68,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
   const [siegeThreats, setSiegeThreats] = useState<SiegeThreat[]>([]);
   const [opponentSiegeDisplay, setOpponentSiegeDisplay] = useState<SiegeThreat[]>([]);
   const [recallSource, setRecallSource] = useState<{ boardIdx: number; cellIdx: number } | null>(null);
+  const [gravityAnimation, setGravityAnimation] = useState<{ boardIdx: number; moves: Map<number, number> } | null>(null);
 
   // ===== Refs (for WS handler closure stability) =====
   const myBanRef = useRef<PowerUpCard | null>(null);
@@ -81,7 +84,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
   const turnPhaseRef = useRef<TurnPhase>('normal');
   const pendingRef = useRef({
     opponentCard: null as ActiveCard | null,
-    ddStage: 0,
     hasteStage: 0,
   });
   const redirectPendingRef = useRef<{
@@ -107,6 +109,13 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current);
     };
   }, []);
+
+  // Clear gravity animation after it plays
+  useEffect(() => {
+    if (!gravityAnimation) return;
+    const t = setTimeout(() => setGravityAnimation(null), 500);
+    return () => clearTimeout(t);
+  }, [gravityAnimation]);
 
   // ===== Helpers =====
 
@@ -163,11 +172,12 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
     cardUsedThisTurnRef.current = null;
     opponentCardThisTurnRef.current = null;
     setRecallSource(null);
+    setGravityAnimation(null);
     setTurnPhase('normal');
     turnPhaseRef.current = 'normal';
     updateMySiege([]);
     opponentSiegeRef.current = [];
-    pendingRef.current = { opponentCard: null, ddStage: 0, hasteStage: 0 };
+    pendingRef.current = { opponentCard: null, hasteStage: 0 };
     redirectPendingRef.current = null;
     deferredHasteRef.current = null;
     preCardWinnersRef.current = null;
@@ -390,19 +400,23 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         const card = activatingCard;
 
         // Board-target cards
-        if (card === 'condemn' || card === 'swap' || card === 'shatter') {
+        if (card === 'condemn' || card === 'swap' || card === 'shatter' || card === 'gravity') {
           try {
             // Save winners before card effect so passives detect changes after placement
             preCardWinnersRef.current = engine.boards.map(b => b.winner);
             if (card === 'condemn') applyCondemn(engine, boardIndex);
             else if (card === 'swap') applySwap(engine, boardIndex);
+            else if (card === 'gravity') {
+              const gravityMoves = applyGravity(engine, boardIndex);
+              setGravityAnimation({ boardIdx: boardIndex, moves: gravityMoves });
+            }
             else applyShatter(engine, boardIndex);
             commitMyCard(card);
             ws.send(JSON.stringify({ type: 'card-effect', card, boardIdx: boardIndex }));
             // If the card effect ended the game (e.g., swap completes macro line), show result
             if (engine.winner || engine.drawn) { preCardWinnersRef.current = null; }
             refreshGameView();
-            triggerFlash([boardIndex], card === 'swap' ? 'violet' : card === 'shatter' ? 'rose' : 'zinc');
+            triggerFlash([boardIndex], card === 'swap' ? 'violet' : card === 'shatter' ? 'rose' : card === 'gravity' ? 'amber' : 'zinc');
           } catch {
             /* invalid target */
           }
@@ -459,7 +473,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
           return;
         }
 
-        // Flow modifier cards (dd, haste, redirect) — fall through to placement
+        // Flow modifier cards (haste, redirect) — fall through to placement
       }
 
       // --- Redirect-pick phase ---
@@ -497,7 +511,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         return;
       }
 
-      // --- Normal / DD-second / Haste-second placement ---
+      // --- Normal / Haste-second placement ---
       if (engine.currentPlayer !== mySymbol) return;
       const legal = availableMoves(engine).some(([b, c]) => b === boardIndex && c === cellIndex);
       if (!legal) return;
@@ -510,7 +524,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       const pendingFlowCard =
         turnPhaseRef.current === 'normal' &&
         activatingCard &&
-        ['double-down', 'haste', 'redirect'].includes(activatingCard)
+        ['haste', 'redirect'].includes(activatingCard)
           ? activatingCard
           : null;
 
@@ -524,14 +538,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       const lastMove = { player: mySymbol, boardIndex, cellIndex };
       ws.send(JSON.stringify({ type: 'move', boardIndex, cellIndex }));
 
-      // DD-second: done
-      if (turnPhaseRef.current === 'dd-second') {
-        setTurnPhase('normal');
-        turnPhaseRef.current = 'normal';
-        checkPassives(engine, mySymbol as Player, prevWinners, lastMove);
-        return;
-      }
-
       // Haste-second: done
       if (turnPhaseRef.current === 'haste-second') {
         setTurnPhase('normal');
@@ -541,24 +547,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       }
 
       // --- Post-move flow card handling ---
-      if (pendingFlowCard === 'double-down' && !engine.winner && !engine.drawn) {
-        const boardLive = isBoardLive(engine, boardIndex);
-        engine.currentPlayer = mySymbol as Player;
-        engine.zkey ^= engine.zobrist.stmKey();
-        if (boardLive) {
-          engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-          engine.nextBoardIndex = boardIndex;
-          engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-          setTurnPhase('dd-second');
-          turnPhaseRef.current = 'dd-second';
-          setGame(toGameState(engine, lastMove));
-          return;
-        }
-        // Board not live — dd wasted, undo switch
-        engine.currentPlayer = engine.currentPlayer === 'X' ? 'O' : 'X';
-        engine.zkey ^= engine.zobrist.stmKey();
-      }
-
       if (pendingFlowCard === 'haste' && !engine.winner && !engine.drawn) {
         // Defer haste second turn — run passives first (arsenal/siege may trigger)
         deferredHasteRef.current = mySymbol as Player;
@@ -631,7 +619,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         const card = msg.card as ActiveCard;
 
         // Save winners before card effect so passives detect card-caused changes
-        const stateChangingCards = ['recall', 'swap', 'shatter', 'condemn', 'overwrite', 'sabotage'];
+        const stateChangingCards = ['recall', 'swap', 'shatter', 'condemn', 'overwrite', 'sabotage', 'gravity'];
         if (stateChangingCards.includes(card)) {
           preCardWinnersRef.current = engine.boards.map(b => b.winner);
         }
@@ -643,6 +631,10 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         else if (card === 'swap') applySwap(engine, msg.boardIdx);
         else if (card === 'shatter') applyShatter(engine, msg.boardIdx);
         else if (card === 'condemn') applyCondemn(engine, msg.boardIdx);
+        else if (card === 'gravity') {
+          const gravityMoves = applyGravity(engine, msg.boardIdx);
+          setGravityAnimation({ boardIdx: msg.boardIdx, moves: gravityMoves });
+        }
 
         // If the card effect ended the game, clear saved winners
         if (engine.winner || engine.drawn) preCardWinnersRef.current = null;
@@ -654,10 +646,10 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         else if (card === 'condemn') triggerFlash([msg.boardIdx], 'zinc');
         else if (card === 'overwrite') triggerFlash([msg.boardIdx], 'rose');
         else if (card === 'sabotage') triggerFlash([msg.boardIdx], 'violet');
+        else if (card === 'gravity') triggerFlash([msg.boardIdx], 'amber');
 
         // Set pending for flow cards
-        if (card === 'double-down') pendingRef.current.opponentCard = 'double-down';
-        else if (card === 'haste') pendingRef.current.opponentCard = 'haste';
+        if (card === 'haste') pendingRef.current.opponentCard = 'haste';
         else if (card === 'redirect') pendingRef.current.opponentCard = 'redirect';
 
         // Mark card as used in opponent's state
@@ -665,7 +657,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         opponentCardThisTurnRef.current = card;
 
         // Show notice
-        if (!['double-down', 'haste', 'redirect'].includes(card)) {
+        if (!['haste', 'redirect'].includes(card)) {
           if (noticeTimeoutRef.current) clearTimeout(noticeTimeoutRef.current);
           setOpponentCardNotice(CARD_CATALOG[card].name);
           noticeTimeoutRef.current = setTimeout(() => {
@@ -701,38 +693,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         const lastMove = { player, boardIndex: msg.boardIndex, cellIndex: msg.cellIndex };
 
         const pending = pendingRef.current;
-
-        // Handle double-down first move
-        if (pending.opponentCard === 'double-down' && pending.ddStage === 0) {
-          if (!engine.winner && !engine.drawn) {
-            const boardLive = isBoardLive(engine, msg.boardIndex);
-            engine.currentPlayer = opponentSymbol;
-            engine.zkey ^= engine.zobrist.stmKey();
-            if (boardLive) {
-              engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-              engine.nextBoardIndex = msg.boardIndex;
-              engine.zkey ^= engine.zobrist.nbiKey(engine.nextBoardIndex);
-              pending.ddStage = 1;
-              setGame(toGameState(engine, lastMove));
-              return;
-            }
-            // Board not live, undo
-            engine.currentPlayer = engine.currentPlayer === 'X' ? 'O' : 'X';
-            engine.zkey ^= engine.zobrist.stmKey();
-          }
-          pending.opponentCard = null;
-          pending.ddStage = 0;
-          checkPassives(engine, opponentSymbol, prevWinners, lastMove);
-          return;
-        }
-
-        // Handle double-down second move
-        if (pending.opponentCard === 'double-down' && pending.ddStage === 1) {
-          pending.opponentCard = null;
-          pending.ddStage = 0;
-          checkPassives(engine, opponentSymbol, prevWinners, lastMove);
-          return;
-        }
 
         // Handle haste first move — run passives, defer second turn
         if (pending.opponentCard === 'haste' && pending.hasteStage === 0) {
@@ -808,10 +768,12 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         const b = engine.boards[i];
         if (b.condemned) continue;
         if (activatingCard === 'condemn' && (b.winner || b.drawn)) continue;
-        // Swap: live boards only. Shatter: any non-condemned with pieces.
+        // Swap/Gravity: live boards only. Shatter: any non-condemned with pieces.
         if (activatingCard === 'swap' && (b.winner || b.drawn)) continue;
+        if (activatingCard === 'gravity' && (b.winner || b.drawn)) continue;
         if ((activatingCard === 'swap' || activatingCard === 'shatter') && !b.cells.some(c => c !== ''))
           continue;
+        if (activatingCard === 'gravity' && computeGravity(b.cells as ('' | 'X' | 'O')[]).size === 0) continue;
         validBoards.add(i);
       }
       return { mode: 'board' as const, validBoards };
@@ -927,10 +889,8 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
 
   // Phase hint with descriptive text
   const phaseHint =
-    turnPhase === 'dd-second'
-      ? { label: 'Double Down', desc: 'Place your second piece on the same board' }
-      : turnPhase === 'haste-second'
-        ? { label: 'Haste', desc: 'Take your second consecutive turn' }
+    turnPhase === 'haste-second'
+      ? { label: 'Haste', desc: 'Take your second consecutive turn' }
         : turnPhase === 'redirect-pick'
           ? { label: 'Redirect', desc: 'Click a board to send your opponent there' }
           : turnPhase === 'momentum-bonus'
@@ -1030,6 +990,8 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         flashBoards={flashBoards.size > 0 ? flashBoards : undefined}
         siegeCells={siegeCellsMap}
         conquestBonusBoards={game.conquestBonusBoards ? new Set(game.conquestBonusBoards) : undefined}
+        gravityMoves={gravityAnimation?.moves}
+        gravityBoardIdx={gravityAnimation?.boardIdx}
       />
 
       {myPU && (

@@ -11,7 +11,7 @@ import {
 
 export type PowerUpCategory = 'strike' | 'tactics' | 'disruption' | 'doctrine';
 
-export type StrikeCard = 'double-down' | 'haste' | 'overwrite';
+export type StrikeCard = 'gravity' | 'haste' | 'overwrite';
 export type TacticsCard = 'redirect' | 'recall' | 'condemn';
 export type DisruptionCard = 'swap' | 'shatter' | 'sabotage';
 export type DoctrineCard = 'momentum' | 'siege' | 'arsenal';
@@ -33,14 +33,14 @@ export interface CardDef {
 
 export const CARD_CATALOG: Record<PowerUpCard, CardDef> = {
   // Strike
-  'double-down': {
-    id: 'double-down',
-    name: 'Double Down',
+  'gravity': {
+    id: 'gravity',
+    name: 'Gravity',
     category: 'strike',
-    description: 'Place two pieces on the same board this turn.',
-    flavor: 'Finisher',
+    description: 'All pieces on a board fall to the bottom of their columns.',
+    flavor: 'Physics',
     passive: false,
-    targetType: 'none',
+    targetType: 'board',
   },
   'haste': {
     id: 'haste',
@@ -148,7 +148,7 @@ export const CARD_CATALOG: Record<PowerUpCard, CardDef> = {
 
 // ---- Category card lists ----
 
-export const STRIKE_CARDS: StrikeCard[] = ['double-down', 'haste', 'overwrite'];
+export const STRIKE_CARDS: StrikeCard[] = ['gravity', 'haste', 'overwrite'];
 export const TACTICS_CARDS: TacticsCard[] = ['redirect', 'recall', 'condemn'];
 export const DISRUPTION_CARDS: DisruptionCard[] = ['swap', 'shatter', 'sabotage'];
 export const DOCTRINE_CARDS: DoctrineCard[] = ['momentum', 'siege', 'arsenal'];
@@ -172,6 +172,7 @@ export const CATEGORY_COLORS: Record<PowerUpCategory, {
 };
 
 export const CARD_FLASH_COLORS: Partial<Record<ActiveCard, string>> = {
+  gravity: 'amber',
   overwrite: 'rose',
   sabotage: 'violet',
   recall: 'sky',
@@ -191,7 +192,7 @@ export interface PowerUpDraft {
 
 export function createDefaultDraft(): PowerUpDraft {
   return {
-    strike: 'double-down',
+    strike: 'gravity',
     tactics: 'recall',
     disruption: 'swap',
     doctrine: 'momentum',
@@ -383,6 +384,67 @@ export function applyRedirect(game: HyperXOGame, targetBoard: number): void {
   game.zkey ^= game.zobrist.nbiKey(game.nextBoardIndex);
   game.nextBoardIndex = targetBoard;
   game.zkey ^= game.zobrist.nbiKey(game.nextBoardIndex);
+}
+
+// Gravity: pieces fall to the bottom of their columns
+// Returns a map from old cell index to new cell index for pieces that moved.
+export function computeGravity(cells: ('' | 'X' | 'O')[]): Map<number, number> {
+  const moves = new Map<number, number>();
+  // Process each column (cells 0,3,6 / 1,4,7 / 2,5,8)
+  for (let col = 0; col < 3; col++) {
+    const colCells = [col, col + 3, col + 6]; // top to bottom
+    const pieces: { idx: number; val: 'X' | 'O' }[] = [];
+    for (const idx of colCells) {
+      if (cells[idx] !== '') pieces.push({ idx, val: cells[idx] as 'X' | 'O' });
+    }
+    // Place pieces at bottom of column (reverse order: fill from bottom)
+    const bottomSlots = [...colCells].reverse(); // [col+6, col+3, col]
+    for (let i = 0; i < pieces.length; i++) {
+      const targetIdx = bottomSlots[i];
+      const sourceIdx = pieces[pieces.length - 1 - i].idx; // bottom-most piece first
+      if (sourceIdx !== targetIdx) {
+        moves.set(sourceIdx, targetIdx);
+      }
+    }
+  }
+  return moves;
+}
+
+export function applyGravity(game: HyperXOGame, boardIdx: number): Map<number, number> {
+  const board = game.boards[boardIdx];
+  if (board.condemned || board.winner || board.drawn) throw new Error('Can only apply gravity to live board');
+
+  const moves = computeGravity(board.cells as ('' | 'X' | 'O')[]);
+  if (moves.size === 0) return moves;
+
+  // Remove all moved pieces from Zobrist
+  for (const [from] of moves) {
+    const piece = board.cells[from] as 'X' | 'O';
+    game.zkey ^= game.zobrist.pieceKey(boardIdx, from, piece);
+  }
+
+  // Apply the moves to the cells array
+  const newCells = [...board.cells] as ('' | 'X' | 'O')[];
+  // First clear all source cells that are moving
+  for (const [from] of moves) {
+    newCells[from] = '';
+  }
+  // Then place at destinations
+  for (const [from, to] of moves) {
+    newCells[to] = board.cells[from] as 'X' | 'O';
+  }
+  for (let i = 0; i < 9; i++) board.cells[i] = newCells[i];
+
+  // Re-add all pieces to Zobrist at their new positions
+  for (const [, to] of moves) {
+    const piece = board.cells[to] as 'X' | 'O';
+    game.zkey ^= game.zobrist.pieceKey(boardIdx, to, piece);
+  }
+
+  recalcBoard(board);
+  updateGlobalState(game);
+  sanitizeNextBoardIndex(game);
+  return moves;
 }
 
 // ---- Siege passive helpers ----

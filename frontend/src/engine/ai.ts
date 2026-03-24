@@ -439,6 +439,11 @@ function cardAdjustments(
     }
   }
 
+  // Opponent has gravity → board rearrangement threat
+  if (opponentCards.includes('gravity')) adj -= 3;
+  // We have gravity → potential to create winning lines
+  if (myCards.includes('gravity')) adj += 2;
+
   return adj;
 }
 
@@ -512,17 +517,9 @@ function cardAdjustmentsSuddenDeath(
     }
   }
 
-  // Opponent has double-down → two pieces on one board is very dangerous
-  if (opponentCards.includes('double-down')) {
-    for (const board of game.boards) {
-      if (board.winner || board.drawn || board.condemned) continue;
-      for (const [a, b, c] of WINNING_LINES) {
-        const trio = [board.cells[a], board.cells[b], board.cells[c]];
-        if (trio.filter(t => t === opp).length === 1 && trio.filter(t => t === '').length === 2) {
-          adj -= 3; // even 1-in-a-row with 2 empty = completable via DD
-        }
-      }
-    }
+  // Opponent has gravity → board rearrangement could create winning lines
+  if (opponentCards.includes('gravity')) {
+    adj -= 5; // general threat: unpredictable board reshuffling
   }
 
   // Opponent has shatter/sabotage → if we've won a board (game should be over,
@@ -670,10 +667,11 @@ function cardAdjustmentsMisere(
     }
   }
 
-  // Opponent has haste/double-down → risky for THEM (might accidentally win boards)
+  // Opponent has haste → risky for THEM (might accidentally win boards)
   // So these are actually less threatening in misère
   if (opponentCards.includes('haste')) adj += 3;    // haste is a liability for opponent
-  if (opponentCards.includes('double-down')) adj += 2;
+  // Gravity could accidentally create wins for either player — slight concern
+  if (opponentCards.includes('gravity')) adj -= 2;
 
   // Opponent has overwrite → they replace our piece with theirs.
   // Could cause THEM to win a board (bad for them in misère) or prevent us from winning
@@ -707,9 +705,10 @@ function cardAdjustmentsMisere(
     }
   }
 
-  // We have haste/double-down → risky for us in misère (might win unwanted boards)
+  // We have haste → risky for us in misère (might win unwanted boards)
   if (myCards.includes('haste')) adj -= 2;
-  if (myCards.includes('double-down')) adj -= 1;
+  // Gravity could create accidental board wins in either direction
+  if (myCards.includes('gravity')) adj -= 1;
 
   return adj;
 }
@@ -869,6 +868,10 @@ function cardAdjustmentsConquest(
       }
     }
   }
+
+  // Gravity: board rearrangement can swing point-valuable boards
+  if (opponentCards.includes('gravity')) adj -= 4;
+  if (myCards.includes('gravity')) adj += 3;
 
   return adj;
 }

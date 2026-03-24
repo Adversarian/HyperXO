@@ -17,6 +17,7 @@ interface Props {
   isHoverTarget?: boolean;
   currentPlayer?: string;
   isBonusBoard?: boolean;
+  gravityMoves?: Map<number, number>;
 }
 
 const FLASH_CLASSES: Record<string, string> = {
@@ -62,9 +63,20 @@ export default function SmallBoard({
   isHoverTarget,
   currentPlayer,
   isBonusBoard,
+  gravityMoves,
 }: Props) {
   const resolved = board.winner || board.drawn || board.condemned;
   const winLine = board.winner ? getWinLine(board.cells, board.winner) : null;
+
+  // Build reverse gravity map: for each destination cell, how many rows did it fall?
+  const gravityFallRows = gravityMoves ? new Map<number, number>() : undefined;
+  if (gravityMoves) {
+    for (const [from, to] of gravityMoves) {
+      const fromRow = Math.floor(from / 3);
+      const toRow = Math.floor(to / 3);
+      gravityFallRows!.set(to, toRow - fromRow); // positive = fell downward
+    }
+  }
 
   const bgColor = resolved
     ? board.winner === 'X'
@@ -191,7 +203,16 @@ export default function SmallBoard({
             `}
           >
             {cell ? (
-              <span className={isLastMove && !targetMode ? 'animate-piece-pop inline-block' : ''}>
+              <span
+                className={
+                  isLastMove && !targetMode ? 'animate-piece-pop inline-block'
+                  : gravityFallRows?.has(cellIdx) ? 'animate-gravity-fall inline-block'
+                  : ''
+                }
+                style={gravityFallRows?.has(cellIdx) ? {
+                  '--gravity-rows': gravityFallRows.get(cellIdx),
+                } as React.CSSProperties : undefined}
+              >
                 <Mark mark={cell} />
               </span>
             ) : playable && currentPlayer ? (

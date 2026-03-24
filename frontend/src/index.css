@@ -59,6 +59,18 @@
   animation: tab-fade 150ms ease-out;
 }
 
+/* Gravity card: pieces fall to bottom of columns */
+@keyframes gravity-fall {
+  0%   { transform: translateY(calc(var(--gravity-rows) * -110%)); }
+  60%  { transform: translateY(4%); }
+  80%  { transform: translateY(-2%); }
+  100% { transform: translateY(0); }
+}
+
+.animate-gravity-fall {
+  animation: gravity-fall 400ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 /* Piece placement: pop-in */
 @keyframes piece-pop {
   0%   { transform: scale(0); opacity: 0; }
