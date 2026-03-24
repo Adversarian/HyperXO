@@ -14,7 +14,7 @@ import {
 // TT entry flags
 const EXACT = 0, LOWER = 1, UPPER = 2;
 
-const TT_MAX_SIZE = 600_000;
+const TT_MAX_SIZE = 200_000;
 
 interface TTEntry {
   depth: number;
@@ -37,10 +37,19 @@ export interface MinimaxAI {
   blunderRate: number;
   tt: Map<number, TTEntry>;
   cardCtx: CardContext | null;
+  /** Search deadline (Date.now() timestamp). 0 = no limit. */
+  deadline: number;
+  /** Set to true when search is aborted due to time limit. */
+  aborted: boolean;
+  /** Node counter for periodic deadline checks. */
+  nodes: number;
 }
 
+/** Max search time in ms. Prevents page from becoming unresponsive. */
+const SEARCH_TIME_LIMIT_MS = 4000;
+
 export function createAI(player: Player, depth: number, blunderRate = 0): MinimaxAI {
-  return { player, depth, blunderRate, tt: new Map(), cardCtx: null };
+  return { player, depth, blunderRate, tt: new Map(), cardCtx: null, deadline: 0, aborted: false, nodes: 0 };
 }
 
 // Difficulty presets: [depth, blunderRate]
@@ -66,6 +75,11 @@ export function choose(ai: MinimaxAI, game: HyperXOGame): [number, number] {
   // Cap TT
   if (ai.tt.size > TT_MAX_SIZE) ai.tt.clear();
 
+  // Set search deadline
+  ai.deadline = Date.now() + SEARCH_TIME_LIMIT_MS;
+  ai.aborted = false;
+  ai.nodes = 0;
+
   let bestMove: [number, number] | null = null;
   let prevScore = 0;
   const ASPIRATION_MARGIN = 50;
@@ -75,14 +89,18 @@ export function choose(ai: MinimaxAI, game: HyperXOGame): [number, number] {
     const beta = prevScore + ASPIRATION_MARGIN;
     let [score, move] = minimax(ai, game, d, d, alpha, beta, true);
 
+    if (ai.aborted) break;
+
     if (score <= alpha || score >= beta) {
       [score, move] = minimax(ai, game, d, d, -Infinity, Infinity, true);
+      if (ai.aborted) break;
     }
 
     if (move !== null) bestMove = move;
     prevScore = score;
   }
 
+  ai.deadline = 0;
   return bestMove ?? moves[0];
 }
 
@@ -99,6 +117,14 @@ function minimax(
   beta: number,
   maximizing: boolean,
 ): [number, [number, number] | null] {
+  // Time check: abort if deadline exceeded (every 4096 nodes)
+  ai.nodes++;
+  if (ai.deadline > 0 && (ai.nodes & 4095) === 0 && Date.now() > ai.deadline) {
+    ai.aborted = true;
+    return [evaluate(ai, game), null];
+  }
+  if (ai.aborted) return [evaluate(ai, game), null];
+
   // Terminal / leaf
   if (game.winner || game.drawn) return [evaluateTerminal(ai, game, depth), null];
   if (depth === 0) return [evaluate(ai, game), null];
@@ -221,7 +247,7 @@ export function evaluateForPlayer(game: HyperXOGame, player: Player, cardCtx?: C
   if (game.winner === player) return 10000;
   if (game.winner !== null) return -10000;
   if (game.drawn) return 0;
-  const tempAi: MinimaxAI = { player, depth: 0, blunderRate: 0, tt: new Map(), cardCtx: cardCtx ?? null };
+  const tempAi: MinimaxAI = { player, depth: 0, blunderRate: 0, tt: new Map(), cardCtx: cardCtx ?? null, deadline: 0, aborted: false, nodes: 0 };
   return evaluate(tempAi, game);
 }
 

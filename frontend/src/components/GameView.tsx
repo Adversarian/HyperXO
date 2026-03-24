@@ -225,7 +225,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       setTimeout(() => {
         try {
           if (engine.winner || engine.drawn) { setAiThinking(false); return; }
-          ai.tt.clear(); // TT is stale after manual player switch
           const move2 = choose(ai, engine);
           const prevW2 = engine.boards.map(b => b.winner);
           applyMove(engine, move2[0], move2[1]);
@@ -257,7 +256,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
       setTimeout(() => {
         try {
           if (engine.winner || engine.drawn) { setAiThinking(false); return; }
-          ai.tt.clear(); // TT is stale after manual player switch
           const move2 = choose(ai, engine);
           const prevW2 = engine.boards.map(b => b.winner);
           applyMove(engine, move2[0], move2[1]);
@@ -374,7 +372,6 @@ export default function GameView({ difficulty, playerSymbol, aiName, mode, draft
     }
 
     const prevWinners = preCardWinners ?? engine.boards.map(b => b.winner);
-    if (preCardWinners) ai.tt.clear(); // TT is stale after pre-card state changes
     const move = choose(ai, engine);
     applyMove(engine, move[0], move[1]);
     const lastMove = { player: aiSymbol, boardIndex: move[0], cellIndex: move[1] };

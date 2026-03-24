@@ -97,9 +97,6 @@ function executeAiTurn(game: HyperXOGame, player: SimPlayer, opponent: SimPlayer
     applyAiPreCard(game, cardDecision);
     checkZkey(game, 'after pre-card');
 
-    // Critical: clear TT after manual state modification (this was the TT poisoning fix)
-    player.ai.tt.clear();
-
     if (game.winner || game.drawn) return result;
   }
 
@@ -135,7 +132,6 @@ function executeAiTurn(game: HyperXOGame, player: SimPlayer, opponent: SimPlayer
           game.currentPlayer = player.ai.player;
           game.zkey ^= game.zobrist.stmKey();
           checkZkey(game, 'haste: after switch');
-          player.ai.tt.clear();
           result.passivesTriggered.push('haste-second-turn');
 
           const hasteMoves = availableMoves(game);
@@ -176,7 +172,6 @@ function executeAiTurn(game: HyperXOGame, player: SimPlayer, opponent: SimPlayer
       game.currentPlayer = player.ai.player;
       game.zkey ^= game.zobrist.stmKey();
       checkZkey(game, 'momentum: after switch');
-      player.ai.tt.clear();
 
       const momMoves = availableMoves(game);
       if (momMoves.length > 0) {
