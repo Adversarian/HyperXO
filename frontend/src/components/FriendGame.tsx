@@ -85,11 +85,9 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
   const pendingRef = useRef({
     opponentCard: null as ActiveCard | null,
     hasteStage: 0,
+    redirectTarget: null as number | null,
   });
-  const redirectPendingRef = useRef<{
-    prevWinners: (Player | null)[];
-    lastMove: { player: string; boardIndex: number; cellIndex: number };
-  } | null>(null);
+  const redirectTargetRef = useRef<number | null>(null);
   const deferredHasteRef = useRef<Player | null>(null);
   const cardUsedThisTurnRef = useRef<ActiveCard | null>(null);
   const opponentCardThisTurnRef = useRef<ActiveCard | null>(null);
@@ -177,8 +175,8 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
     turnPhaseRef.current = 'normal';
     updateMySiege([]);
     opponentSiegeRef.current = [];
-    pendingRef.current = { opponentCard: null, hasteStage: 0 };
-    redirectPendingRef.current = null;
+    pendingRef.current = { opponentCard: null, hasteStage: 0, redirectTarget: null };
+    redirectTargetRef.current = null;
     deferredHasteRef.current = null;
     preCardWinnersRef.current = null;
     setOpponentCardNotice(null);
@@ -364,9 +362,9 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       const engine = engineRef.current;
       if (!engine || !myPURef.current || engine.currentPlayer !== mySymbol) return;
 
-      // All cards need targeting or are flow modifiers
       setActivatingCard(card);
       setRecallSource(null);
+      redirectTargetRef.current = null;
     },
     [mySymbol],
   );
@@ -374,6 +372,7 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
   const cancelActivation = useCallback(() => {
     setActivatingCard(null);
     setRecallSource(null);
+    redirectTargetRef.current = null;
   }, []);
 
   // ===== Cell click handler =====
@@ -386,6 +385,13 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       // --- Pre-placement card targeting ---
       if (activatingCard && turnPhaseRef.current === 'normal') {
         const card = activatingCard;
+
+        // Redirect: pre-select target board, then place piece normally
+        if (card === 'redirect' && redirectTargetRef.current === null) {
+          redirectTargetRef.current = boardIndex;
+          refreshGameView();
+          return;
+        }
 
         // Board-target cards
         if (card === 'condemn' || card === 'swap' || card === 'shatter' || card === 'gravity') {
@@ -464,27 +470,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         // Flow modifier cards (haste, redirect) — fall through to placement
       }
 
-      // --- Redirect-pick phase ---
-      if (turnPhaseRef.current === 'redirect-pick') {
-        try {
-          applyRedirect(engine, boardIndex);
-        } catch {
-          return;
-        }
-        ws.send(JSON.stringify({ type: 'redirect-target', boardIdx: boardIndex }));
-        setTurnPhase('normal');
-        turnPhaseRef.current = 'normal';
-        // Now check passives with the saved state from when the move was made
-        const rp = redirectPendingRef.current;
-        redirectPendingRef.current = null;
-        if (rp) {
-          checkPassives(engine, mySymbol as Player, rp.prevWinners, rp.lastMove);
-        } else {
-          refreshGameView();
-        }
-        return;
-      }
-
       // --- Momentum-bonus phase ---
       if (turnPhaseRef.current === 'momentum-bonus') {
         const legal = availableMoves(engine).some(([b, c]) => b === boardIndex && c === cellIndex);
@@ -508,23 +493,34 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
       const savedPreCardWinners = preCardWinnersRef.current;
       preCardWinnersRef.current = null;
 
-      // Send flow card effect BEFORE the move so opponent can track it
-      const pendingFlowCard =
-        turnPhaseRef.current === 'normal' &&
-        activatingCard &&
-        ['haste', 'redirect'].includes(activatingCard)
-          ? activatingCard
-          : null;
+      // Send haste card effect BEFORE the move so opponent can track it
+      const isHaste =
+        turnPhaseRef.current === 'normal' && activatingCard === 'haste';
 
-      if (pendingFlowCard) {
-        commitMyCard(pendingFlowCard);
-        ws.send(JSON.stringify({ type: 'card-effect', card: pendingFlowCard }));
+      if (isHaste) {
+        commitMyCard('haste');
+        ws.send(JSON.stringify({ type: 'card-effect', card: 'haste' }));
+      }
+
+      // Redirect: send card-effect with pre-selected target before the move
+      const redirectTarget = redirectTargetRef.current;
+      if (activatingCard === 'redirect' && redirectTarget !== null) {
+        commitMyCard('redirect');
+        ws.send(JSON.stringify({ type: 'card-effect', card: 'redirect', redirectTarget }));
+        redirectTargetRef.current = null;
       }
 
       const prevWinners = savedPreCardWinners ?? engine.boards.map(b => b.winner);
       engineApply(engine, boardIndex, cellIndex);
       const lastMove = { player: mySymbol, boardIndex, cellIndex };
       ws.send(JSON.stringify({ type: 'move', boardIndex, cellIndex }));
+
+      // Apply redirect after placement
+      if (redirectTarget !== null && !engine.winner && !engine.drawn) {
+        try { applyRedirect(engine, redirectTarget); } catch { /* target invalid */ }
+        checkPassives(engine, mySymbol as Player, prevWinners, lastMove);
+        return;
+      }
 
       // Haste-second: done
       if (turnPhaseRef.current === 'haste-second') {
@@ -534,23 +530,15 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         return;
       }
 
-      // --- Post-move flow card handling ---
-      if (pendingFlowCard === 'haste' && !engine.winner && !engine.drawn) {
-        // Defer haste second turn — run passives first (arsenal/siege may trigger)
+      // Haste first move — defer second turn, run passives first
+      if (isHaste && !engine.winner && !engine.drawn) {
         deferredHasteRef.current = mySymbol as Player;
         checkPassives(engine, mySymbol as Player, prevWinners, lastMove);
         return;
       }
 
-      if (pendingFlowCard === 'redirect' && !engine.winner && !engine.drawn) {
-        redirectPendingRef.current = { prevWinners, lastMove };
-        setTurnPhase('redirect-pick');
-        turnPhaseRef.current = 'redirect-pick';
-        setGame(toGameState(engine, lastMove));
-        return;
-      }
-
       // --- Normal: check passives ---
+      redirectTargetRef.current = null;
       setActivatingCard(null);
       checkPassives(engine, mySymbol as Player, prevWinners, lastMove);
     },
@@ -638,7 +626,10 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
 
         // Set pending for flow cards
         if (card === 'haste') pendingRef.current.opponentCard = 'haste';
-        else if (card === 'redirect') pendingRef.current.opponentCard = 'redirect';
+        else if (card === 'redirect') {
+          pendingRef.current.opponentCard = 'redirect';
+          pendingRef.current.redirectTarget = msg.redirectTarget ?? null;
+        }
 
         // Mark card as used in opponent's state
         if (opponentPURef.current) markCardUsed(opponentPURef.current, card);
@@ -655,19 +646,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         }
 
         refreshGameView();
-        return;
-      }
-
-      // --- Opponent redirect target ---
-      if (msg.type === 'redirect-target') {
-        applyRedirect(engine, msg.boardIdx);
-        const rp = redirectPendingRef.current;
-        redirectPendingRef.current = null;
-        if (rp) {
-          checkPassives(engine, opponentSymbol, rp.prevWinners, rp.lastMove);
-        } else {
-          refreshGameView();
-        }
         return;
       }
 
@@ -693,11 +671,15 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
           return;
         }
 
-        // Handle redirect (move placed, expect redirect-target next)
+        // Handle redirect (apply stored target after move)
         if (pending.opponentCard === 'redirect') {
+          const target = pending.redirectTarget;
           pending.opponentCard = null;
-          redirectPendingRef.current = { prevWinners, lastMove };
-          setGame(toGameState(engine, lastMove));
+          pending.redirectTarget = null;
+          if (target !== null && !engine.winner && !engine.drawn) {
+            try { applyRedirect(engine, target); } catch { /* target invalid */ }
+          }
+          checkPassives(engine, opponentSymbol, prevWinners, lastMove);
           return;
         }
 
@@ -715,14 +697,6 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
   const targeting = (() => {
     const engine = engineRef.current;
     if (!engine) return null;
-
-    if (turnPhaseRef.current === 'redirect-pick') {
-      const validBoards = new Set<number>();
-      for (let i = 0; i < 9; i++) {
-        if (isBoardLive(engine, i)) validBoards.add(i);
-      }
-      return { mode: 'board' as const, validBoards };
-    }
 
     if (!activatingCard || turnPhaseRef.current !== 'normal') return null;
 
@@ -749,6 +723,9 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
         return { mode: 'opponent-cell' as const, validBoards, opponentSymbol: '' };
       }
     }
+
+    // Redirect: target already selected, switch to normal placement mode
+    if (activatingCard === 'redirect' && redirectTargetRef.current !== null) return null;
 
     if (def.targetType === 'board') {
       const validBoards = new Set<number>();
@@ -879,8 +856,8 @@ export default function FriendGame({ ws, myName, opponentName, mySymbol, gambits
   const phaseHint =
     turnPhase === 'haste-second'
       ? { label: 'Haste', desc: 'Take your second consecutive turn' }
-        : turnPhase === 'redirect-pick'
-          ? { label: 'Redirect', desc: 'Click a board to send your opponent there' }
+        : activatingCard === 'redirect' && redirectTargetRef.current !== null
+          ? { label: 'Redirect', desc: 'Place your piece — opponent will be redirected' }
           : turnPhase === 'momentum-bonus'
             ? { label: 'Momentum', desc: 'You won a board — take a bonus turn!' }
             : activatingCard === 'recall' && !recallSource
